@@ -1,0 +1,23 @@
+# Build directories
+build*/
+bin/
+*.dir/
+
+# Visual Studio / MSVC artifacts
+.vs/
+*.sln
+*.vcxproj*
+*.user
+*.suo
+x64/
+Debug/
+Release/
+
+# JUCE generated artifacts
+JuceLibraryCode/
+_deps/
+
+# OS specific
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,27 @@
+# Build directories
+build*/
+**/build*/
+bin/
+**/bin/
+*.dir/
+**/_deps/
+JuceLibraryCode/
+
+# Visual Studio / MSVC artifacts
+.vs/
+*.sln
+*.vcxproj*
+*.user
+*.suo
+x64/
+Debug/
+Release/
+
+# Node / Web
+node_modules/
+npm-debug.log*
+
+# OS specific
+.DS_Store
+Thumbs.db
+Desktop.ini

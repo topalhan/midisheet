@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MidiSheet — Real-Time Web MIDI Sheet Music</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col min-h-screen selection:bg-sky-500 selection:text-white">
+
+  <!-- Header & Toolbar -->
+  <header class="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md sticky top-0 z-30 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20 text-xl font-bold">
+          𝄞
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            MidiSheet
+            <span class="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">Live</span>
+          </h1>
+          <p class="text-xs text-slate-400">Real-time Web MIDI Grand Staff & Notation</p>
+        </div>
+      </div>
+
+      <!-- App Mode Switcher Tabs -->
+      <div class="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-slate-700/80">
+        <button id="tab-free-play" class="mode-tab active flex items-center gap-1.5">
+          <span>🎹</span> Free Play
+        </button>
+        <button id="tab-practice" class="mode-tab flex items-center gap-1.5">
+          <span>🎼</span> Melody Trainer
+          <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">10 Songs</span>
+        </button>
+      </div>
+
+      <!-- MIDI Connection Status & Selector -->
+      <div class="flex items-center flex-wrap gap-2">
+        <div id="midi-status-badge" class="status-badge bg-slate-800 text-slate-400 border border-slate-700">
+          <span class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block mr-1.5"></span> Initializing MIDI...
+        </div>
+
+        <div class="relative">
+          <select id="midi-device-select" class="bg-slate-800/90 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:border-sky-500">
+            <option value="all">All MIDI Inputs</option>
+          </select>
+        </div>
+
+        <button id="btn-refresh-midi" title="Scan for MIDI hardware" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs flex items-center gap-1 transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        </button>
+
+        <!-- Wind Instrument Mode Toggle & Breath Meter -->
+        <button id="btn-toggle-wind-mode" title="Toggle Wind Instrument / EWI Mode (Breath Gating & Monophonic Legato)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors">
+          🌬️ Wind Mode OFF
+        </button>
+
+        <div id="breath-meter-container" class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-sky-500/40 text-xs">
+          <span class="text-[10px] uppercase font-bold text-sky-400">Breath:</span>
+          <div class="w-14 h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+            <div id="breath-meter-bar" class="bg-gradient-to-r from-sky-400 to-emerald-400 h-full rounded-full transition-all duration-75" style="width: 0%"></div>
+          </div>
+          <span id="breath-value-text" class="text-[10px] font-mono text-slate-300 w-4 text-right">0</span>
+          <button id="btn-calibrate-breath" title="Auto-calibrate idle breath to zero (click while not blowing)" class="px-1.5 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-[10px] font-bold text-white transition-colors">
+            Zero
+          </button>
+          <div class="h-3 w-px bg-slate-700 mx-0.5"></div>
+          <span class="text-[10px] text-slate-400 font-medium" title="Cutoff threshold below which notes are silenced">Cutoff:</span>
+          <input type="range" id="breath-cutoff-slider" min="1" max="30" value="10" class="w-10 h-1 bg-slate-700 rounded cursor-pointer" title="Adjust breath cutoff threshold (1-30)">
+          <span id="breath-cutoff-display" class="text-[10px] font-mono text-slate-300">10</span>
+        </div>
+
+        <div class="h-5 w-px bg-slate-800 mx-1"></div>
+
+        <!-- Theme Toggle -->
+        <button id="btn-toggle-theme" title="Toggle Theme" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm transition-colors">
+          🌙
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-5">
+
+    <!-- Free Play Header Bar (Chord & Active Notes) -->
+    <div id="freeplay-hud" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+      <div class="flex items-center gap-4">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Detected Chord</div>
+          <div id="chord-name" class="text-2xl md:text-3xl font-bold text-slate-400 transition-colors">
+            Play a chord or note
+          </div>
+        </div>
+        <div class="h-10 w-px bg-slate-800 hidden sm:block"></div>
+        <div class="hidden sm:block">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Quality</div>
+          <div id="chord-quality" class="text-sm font-semibold text-slate-300">Ready</div>
+        </div>
+      </div>
+
+      <!-- Active Notes & Pedal Status -->
+      <div class="flex items-center gap-3">
+        <div id="pedal-indicator" class="pedal-badge">
+          Pedal UP
+        </div>
+        <div class="flex flex-col items-end">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Active Notes</div>
+          <div id="active-notes-list" class="flex flex-wrap gap-1.5 justify-end">
+            <span class="text-xs text-slate-500 italic">No notes held</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Melody Trainer HUD (shown when Melody Trainer mode is active) -->
+    <div id="practice-hud" class="hidden bg-slate-900/80 border border-sky-500/40 rounded-xl p-4 flex flex-col gap-3 shadow-lg shadow-sky-950/30 transition-all relative">
+      
+      <!-- Animated Count-In Banner (Overlay during Tempo Count-In) -->
+      <div id="count-in-banner" class="hidden absolute inset-x-0 -top-3 z-30 mx-auto max-w-sm bg-slate-950/95 border-2 border-sky-400 text-center py-2.5 px-5 rounded-2xl shadow-2xl shadow-sky-500/50 backdrop-blur-md transition-all">
+        <div class="text-[10px] font-black uppercase tracking-widest text-sky-300">Tempo Count-In • Get Ready!</div>
+        <div id="count-in-number" class="text-4xl font-black text-white mt-0.5 animate-bounce">1</div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        
+        <!-- Current Melody Info & Song Chooser -->
+        <div class="flex items-center gap-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <span id="practice-difficulty-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">Easy</span>
+              <span id="practice-composer" class="text-xs text-slate-400">L. van Beethoven</span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <h2 id="practice-melody-title" class="text-xl md:text-2xl font-black text-white">Ode to Joy</h2>
+              <button id="btn-open-melody-modal" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 transition-colors flex items-center gap-1">
+                <span>📚 Choose Melody</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Target Note Prompter & Feedback -->
+        <div class="flex items-center gap-4 bg-slate-950/60 px-4 py-2 rounded-xl border border-slate-800">
+          <div class="text-center">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Target Note</div>
+            <div id="practice-target-note" class="text-2xl font-black text-sky-400 animate-pulse">E4</div>
+          </div>
+          <div class="h-8 w-px bg-slate-800"></div>
+          <div>
+            <div id="practice-feedback-text" class="text-xs font-semibold text-slate-300">Play the glowing note on the sheet</div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span id="practice-streak-badge" class="text-[11px] font-bold text-amber-400">🔥 0 Streak</span>
+              <span id="practice-timing-badge" class="hidden text-[11px] font-bold px-1.5 py-0.5 rounded"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metronome & Tempo Controls -->
+        <div class="flex items-center gap-2.5 bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800">
+          <!-- Metronome Toggle -->
+          <button id="btn-toggle-metronome" title="Toggle audio metronome clicks" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1 transition-colors">
+            <span>⏱️</span>
+            <span id="metronome-status-text">Metronome ON</span>
+          </button>
+
+          <!-- BPM Stepper -->
+          <div class="flex items-center gap-1 bg-slate-900 border border-slate-700/80 rounded-lg px-1.5 py-1" title="Adjust Practice Tempo (BPM)">
+            <button id="btn-bpm-minus" class="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white rounded bg-slate-800 hover:bg-slate-700 font-bold text-xs transition-colors">-</button>
+            <span id="practice-bpm-display" class="text-xs font-mono font-bold text-sky-400 px-1 select-none">108 BPM</span>
+            <button id="btn-bpm-plus" class="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white rounded bg-slate-800 hover:bg-slate-700 font-bold text-xs transition-colors">+</button>
+          </div>
+
+          <!-- Visual Beat Indicator Dots -->
+          <div id="visual-beat-container" class="flex items-center gap-1.5 px-2 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg" title="Beat Meter">
+            <div class="beat-dot downbeat" data-beat="0"></div>
+            <div class="beat-dot" data-beat="1"></div>
+            <div class="beat-dot" data-beat="2"></div>
+            <div class="beat-dot" data-beat="3"></div>
+          </div>
+        </div>
+
+        <!-- Scores & Action Controls -->
+        <div class="flex items-center gap-2.5">
+          <!-- Pitch Accuracy Score Pill -->
+          <div class="bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800 text-right">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Pitch</div>
+            <div id="practice-accuracy-display" class="text-lg font-black text-emerald-400">100%</div>
+          </div>
+
+          <!-- Rhythm Timing Score Pill -->
+          <div class="bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800 text-right">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Rhythm</div>
+            <div id="practice-rhythm-display" class="text-lg font-black text-amber-400">100%</div>
+          </div>
+
+          <!-- Mode Selector -->
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[10px] text-slate-400 font-semibold uppercase">Mode</label>
+            <select id="select-practice-mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs">
+              <option value="wait">Wait for Note</option>
+              <option value="tempo">In-Tempo (BPM)</option>
+            </select>
+          </div>
+
+          <!-- Restart Button -->
+          <button id="btn-restart-practice" title="Restart melody" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-colors">
+            🔄 Restart
+          </button>
+        </div>
+      </div>
+
+      <!-- Note Progress Bar -->
+      <div class="w-full flex items-center gap-3 pt-1">
+        <span id="practice-progress-text" class="text-[11px] font-mono text-slate-400 min-w-[75px]">Note 1 of 15</span>
+        <div class="flex-1 bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+          <div id="practice-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full rounded-full transition-all duration-200" style="width: 7%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff Controls Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-3 text-xs bg-slate-900/40 border border-slate-800/80 px-4 py-2.5 rounded-xl">
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Visualizer Mode -->
+        <div class="flex items-center gap-1.5">
+          <label class="text-slate-400 font-medium">Display:</label>
+          <select id="select-view-mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2.5 py-1 text-xs">
+            <option value="live">Live Grand Staff (Chords)</option>
+            <option value="scrolling">Scrolling Sheet Timeline</option>
+          </select>
+        </div>
+
+        <!-- Accidental Preference -->
+        <button id="toggle-accidentals" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium transition-colors">
+          ♯ Sharps
+        </button>
+
+        <!-- Note Names Toggle -->
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+          <input type="checkbox" id="toggle-note-names" checked class="rounded bg-slate-800 border-slate-700 text-sky-500">
+          <span>Show Pitch Labels</span>
+        </label>
+      </div>
+
+      <!-- Sound Engine Controls -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Instrument Preset -->
+        <div class="flex items-center gap-1.5">
+          <label class="text-slate-400 font-medium">Sound:</label>
+          <select id="select-instrument" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2.5 py-1 text-xs">
+            <optgroup label="🎹 Keyboards & Organs">
+              <option value="grandPiano">Grand Piano (Acoustic)</option>
+              <option value="electricPiano">Electric Piano (Rhodes)</option>
+              <option value="organ">Drawbar Organ</option>
+              <option value="strings">Synth Strings / Pad</option>
+            </optgroup>
+            <optgroup label="🎷 Wind & Brass (EWI)">
+              <option value="flute">Concert Flute</option>
+              <option value="clarinet">Clarinet (Woodwind)</option>
+              <option value="saxophone">Tenor Saxophone</option>
+              <option value="trumpet">Brass / Trumpet</option>
+              <option value="ewiLead">EWI Analog Lead</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- Audio Output / External Sound Card (Interface / Low Latency) -->
+        <div class="flex items-center gap-1.5" id="audio-output-container">
+          <label class="text-slate-400 font-medium" title="Route audio to external sound card or audio interface">Output:</label>
+          <div class="flex items-center gap-1">
+            <select id="select-audio-output" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2.5 py-1 text-xs max-w-[190px] truncate focus:outline-none focus:border-sky-500" title="Select Audio Output Device (External Sound Card / Interface)">
+              <option value="default">Default System Output</option>
+            </select>
+            <button id="btn-refresh-audio" title="Scan sound cards & audio interfaces (click to request device labels)" class="p-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Low Latency Mode Toggle -->
+        <button id="btn-toggle-low-latency" title="Toggle Low Latency Mode (direct zero-lookahead path bypassing compressor and reverb for instantaneous on-tempo response)" class="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1 transition-colors">
+          <span>⚡</span> Low Latency ON
+        </button>
+
+        <!-- Measured Latency Badge -->
+        <div id="audio-latency-badge" class="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-300 cursor-help" title="Web Audio Hardware Buffer Latency">
+          <span id="audio-latency-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="audio-latency-value">-- ms</span>
+        </div>
+
+        <!-- Reverb -->
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+          <input type="checkbox" id="toggle-reverb" class="rounded bg-slate-800 border-slate-700 text-sky-500">
+          <span>Reverb</span>
+        </label>
+
+        <!-- Volume -->
+        <div class="flex items-center gap-2">
+          <button id="btn-mute" title="Mute / Unmute" class="text-sm hover:opacity-80">🔊</button>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8" class="w-16 h-1.5 bg-slate-700 rounded-lg cursor-pointer">
+        </div>
+      </div>
+    </div>
+
+    <!-- Grand Staff Card -->
+    <div class="staff-card w-full">
+      <canvas id="staff-canvas"></canvas>
+    </div>
+
+    <!-- Virtual Piano Keyboard Section -->
+    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-300 uppercase tracking-wide text-[11px]">Interactive Piano (61 Keys)</span>
+          <span class="text-slate-500">• C2 to C7</span>
+        </div>
+
+        <!-- Keyboard Controls -->
+        <div class="flex items-center gap-3">
+          <!-- Octave Transposition -->
+          <div class="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-lg p-0.5">
+            <button id="btn-octave-down" title="Octave Down (Key: Z)" class="px-2 py-0.5 rounded hover:bg-slate-700 text-slate-200 font-bold">[-]</button>
+            <span id="current-octave-display" class="px-1.5 font-mono text-sky-400 font-bold text-xs">C4</span>
+            <button id="btn-octave-up" title="Octave Up (Key: X)" class="px-2 py-0.5 rounded hover:bg-slate-700 text-slate-200 font-bold">[+]</button>
+          </div>
+
+          <!-- Key Labels -->
+          <div class="flex items-center gap-1">
+            <span class="text-slate-400">Labels:</span>
+            <select id="select-key-labels" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs">
+              <option value="all">Notes + Keys</option>
+              <option value="qwerty">QWERTY Only</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Piano Keys Scrollable Container -->
+      <div class="piano-scroll-wrapper flex justify-center">
+        <div id="piano-keys" class="piano-container">
+          <!-- Dynamically generated by app.js -->
+        </div>
+      </div>
+
+      <!-- Playing Instructions & Keyboard Map -->
+      <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80 gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-sky-400 font-semibold">QWERTY Play:</span>
+          <span>White: <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">A</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">S</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">D</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">F</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">G</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">H</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">J</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">K</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">L</kbd></span>
+          <span>Black: <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">W</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">E</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">T</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">Y</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">U</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">O</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">P</kbd></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">Space</kbd> = Sustain</span>
+          <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">Z</kbd> / <kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-slate-200">X</kbd> = Octave Shift</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIDI Monitor & Event Inspector (Collapsible) -->
+    <details class="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden group">
+      <summary class="px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-slate-400 cursor-pointer hover:text-slate-200 select-none">
+        <span class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-sky-500 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+          Live MIDI Event Stream Inspector
+        </span>
+        <button id="btn-clear-log" class="text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200">Clear</button>
+      </summary>
+      <div class="p-4 bg-slate-950/70 border-t border-slate-800/80">
+        <div id="midi-log-entries" class="h-32 overflow-y-auto pr-2 space-y-1">
+          <div class="text-xs text-slate-600 font-mono py-2 italic">Awaiting MIDI events (connect a MIDI keyboard or press keys above)...</div>
+        </div>
+      </div>
+    </details>
+
+  </main>
+
+  <!-- Melody Selection Modal -->
+  <div id="modal-melody-select" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🎼</span>
+          <div>
+            <h3 class="font-bold text-white text-base">Select Practice Melody</h3>
+            <p class="text-[11px] text-slate-400">Choose from 10 snippets across varying difficulty levels</p>
+          </div>
+        </div>
+        <button id="btn-close-melody-modal" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-sm">✕</button>
+      </div>
+      <div id="melody-list-container" class="p-4 overflow-y-auto max-h-[60vh] space-y-2.5">
+        <!-- Populated dynamically by app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Performance Scorecard Modal -->
+  <div id="modal-scorecard" class="modal-backdrop">
+    <div class="modal-card max-w-md text-center p-6 flex flex-col items-center gap-4">
+      <!-- Star Icons -->
+      <div id="score-stars-container" class="flex items-center justify-center gap-2">
+        <span class="star-icon">★</span>
+        <span class="star-icon">★</span>
+        <span class="star-icon">★</span>
+      </div>
+      
+      <div>
+        <span class="text-[10px] uppercase font-bold tracking-wider text-sky-400">Accuracy Assessment</span>
+        <h2 id="score-title" class="text-2xl font-black text-white mt-0.5">Melody Completed!</h2>
+        <p id="score-melody-name" class="text-xs text-slate-400 mt-0.5">Ode to Joy • L. van Beethoven</p>
+      </div>
+      
+      <!-- Stats Box -->
+      <div class="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-4 grid grid-cols-2 gap-3 text-center">
+        <div class="border-r border-slate-800/80 pr-2">
+          <div class="text-[10px] uppercase font-bold text-slate-400">Pitch Accuracy</div>
+          <div id="score-accuracy" class="text-3xl font-black text-emerald-400">100%</div>
+          <div class="text-[11px] text-slate-400 mt-1"><span id="score-correct-notes" class="text-slate-200 font-semibold">15 / 15</span> hits • <span id="score-mistakes" class="text-rose-400 font-semibold">0</span> wrong</div>
+        </div>
+        <div class="pl-2">
+          <div class="text-[10px] uppercase font-bold text-slate-400">Rhythm Timing</div>
+          <div id="score-rhythm" class="text-3xl font-black text-amber-400">100%</div>
+          <div class="text-[11px] text-slate-400 mt-1"><span id="score-perfect-hits" class="text-emerald-300 font-semibold">12</span> perfect • <span id="score-missed-notes" class="text-rose-400 font-semibold">0</span> missed</div>
+        </div>
+      </div>
+
+      <!-- Rhythm Timing Breakdown Badges -->
+      <div id="score-rhythm-breakdown" class="flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold">
+        <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" id="score-badge-perfect">🟢 0 Perfect</span>
+        <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30" id="score-badge-great">🟡 0 Early/Late</span>
+        <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30" id="score-badge-missed">🔴 0 Missed</span>
+      </div>
+
+      <div id="score-feedback-message" class="text-xs text-slate-300 italic px-2">
+        Outstanding performance! Flawless reading and pitch accuracy.
+      </div>
+
+      <!-- Action buttons -->
+      <div class="flex items-center gap-2 w-full mt-2">
+        <button id="btn-score-retry" class="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-colors">
+          🔄 Play Again
+        </button>
+        <button id="btn-score-next" class="flex-1 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md shadow-sky-600/30 transition-colors">
+          Next Melody ⏩
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="border-t border-slate-800/80 py-3 px-4 text-center text-xs text-slate-500">
+    MidiSheet • Real-time Web MIDI Music Notation, Trainer & Synthesizer
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
