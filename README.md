@@ -18,12 +18,18 @@ A modern, zero-dependency web application that accepts Web MIDI hardware input (
     8. *Canon in D (Theme)* (J. Pachelbel) — Medium (D Major with F#4 & C#4)
     9. *Bach Minuet in G (Opening)* (J.S. Bach) — Medium (3/4 time)
     10. *Scarborough Fair* (Traditional) — Advanced (D Dorian mode)
-  - **Real-Time Accuracy Scoring**: Tracks notes hit, wrong notes, current streak, best streak, and percentage accuracy.
-  - **Dynamic Sheet Feedback**: Target note highlighted with a glowing halo, target cursor, and pitch label; completed notes turn green; mistakes flash in red.
-  - **Interactive Key Hints**: Virtual piano subtly marks the next target key to assist beginners.
+  - **Full Mistake Inspection & Review (VST3 Parity)**:
+    - Interactive callout cards appear above mistake notes on the Grand Staff showing expected target vs played wrong pitch and attempt counts.
+    - Scorewide mistake badges, canvas `<` / `>` cycling buttons, and clickable note hitboxes.
+    - Dual-key visual piano highlighting (`Target` in emerald green, `Played` in rose red) with auto-centering.
+    - Post-performance scorecard with "Review Mistakes on Sheet" button and clickable note breakdown list.
+  - **Dedicated Live MIDI `INPUT` Column**: Live played notes render cleanly in an isolated column to the left of upcoming melody notes, eliminating visual overlap.
+  - **Inter-Onset Rhythm Evaluation**: Natural musical rhythm assessment in Wait mode (matching C++ `MelodyScorer.cpp`) with phrase anchoring on Note 0 and metronome grid sync.
+  - **Classical Note Engraving**: Vector augmentation dots with automatic staff-line collision avoidance and curved Bezier eighth/sixteenth note flags.
+  - **"🔇 No Sound (Hardware / EWI Audio)" Preset**: Built-in option to mute the internal synth for players using hardware sound generators (e.g. EWI5000, Yamaha YDS, digital pianos) while maintaining full visual notation and scoring.
   - **Two Practice Modes**:
     - *Wait for Note (Learn Mode)*: Pauses until the correct note is played before advancing.
-    - *In-Tempo (Challenge Mode)*: Evaluates performance rhythm and speed.
+    - *In-Tempo (Challenge Mode)*: Evaluates performance rhythm and speed against an ongoing timeline.
   - **Performance Scorecard**: Awards 1, 2, or 3 glowing stars with detailed feedback at the end of each melody.
 - **Real-Time Grand Staff Notation**:
   - Crisp vector Treble Clef and Bass Clef rendering on an HTML5 canvas with HiDPI/Retina support.

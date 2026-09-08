@@ -239,6 +239,13 @@ export class AudioEngine {
 
   setPreset(name) {
     this.preset = name;
+    if (name === 'none') {
+      for (const midi of Array.from(this.activeVoices.keys())) {
+        this.stopVoice(midi, true);
+      }
+      this.activeVoices.clear();
+      this.sustainedVoices.clear();
+    }
   }
 
   setReverb(enable) {
@@ -329,6 +336,7 @@ export class AudioEngine {
    * Play Note On - Synchronous execution when AudioContext is running for zero microtask latency
    */
   noteOn(midi, velocity = 100) {
+    if (this.preset === 'none') return;
     if (!this.isInitialized || !this.ctx || this.ctx.state !== 'running') {
       this.init().then(() => {
         this._triggerNote(midi, velocity);
@@ -339,6 +347,7 @@ export class AudioEngine {
   }
 
   _triggerNote(midi, velocity = 100) {
+    if (this.preset === 'none') return;
     if (!this.ctx || this.ctx.state === 'closed') return;
 
     // If note is already playing, stop existing voice smoothly
@@ -389,6 +398,7 @@ export class AudioEngine {
    * Handle Note Off
    */
   noteOff(midi) {
+    if (this.preset === 'none') return;
     if (this.sustainPedalDown) {
       // Mark as sustained instead of stopping immediately
       this.sustainedVoices.add(midi);

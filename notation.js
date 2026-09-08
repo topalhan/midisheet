@@ -44,7 +44,22 @@ export class NotationRenderer {
     this.lastFrameTime = performance.now();
     this.animationFrameId = null;
 
+    // Mistake Review & Interactive Navigation
+    this.activeReviewMistakeIndex = -1;
+    this.prevMistakeBtnBounds = null;
+    this.nextMistakeBtnBounds = null;
+    this.reviewPillBounds = null;
+    this.noteHitboxes = [];
+    this.onReviewNoteChanged = null;
+
+    // Manual horizontal score dragging & scrolling
+    this.manualScrollOffset = 0;
+    this.isUserDragging = false;
+    this.dragStartX = 0;
+    this.dragStartScroll = 0;
+
     this.initCanvas();
+    this.setupInteractionEvents();
     this.startRenderLoop();
   }
 
@@ -67,6 +82,139 @@ export class NotationRenderer {
 
   setOption(key, value) {
     this.options[key] = value;
+  }
+
+  /**
+   * Set up pointer and touch interaction for mistake review and score panning
+   */
+  setupInteractionEvents() {
+    const getPos = (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    };
+
+    const isInside = (pos, b) => b && pos.x >= b.x && pos.x <= b.x + b.width && pos.y >= b.y && pos.y <= b.y + b.height;
+
+    this.canvas.addEventListener('pointerdown', (e) => {
+      const pos = getPos(e);
+
+      // 1. Check Prev Mistake Button click
+      if (this.prevMistakeBtnBounds && isInside(pos, this.prevMistakeBtnBounds)) {
+        e.preventDefault();
+        this.previousMistake();
+        return;
+      }
+
+      // 2. Check Next Mistake Button click
+      if (this.nextMistakeBtnBounds && isInside(pos, this.nextMistakeBtnBounds)) {
+        e.preventDefault();
+        this.nextMistake();
+        return;
+      }
+
+      // 3. Direct click on mistake notes on staff when finished
+      if (this.practiceData && this.practiceData.isFinished) {
+        for (const hb of this.noteHitboxes) {
+          if (isInside(pos, hb.bounds)) {
+            const results = this.practiceData.noteResults || [];
+            const res = results[hb.index];
+            if (res && (res.mistakes > 0 || res.status === 'mistake' || res.status === 'missed')) {
+              e.preventDefault();
+              this.jumpToMistake(hb.index);
+              return;
+            }
+          }
+        }
+      }
+
+      // 4. Score horizontal drag panning
+      if (this.options.mode === 'practice') {
+        this.isUserDragging = true;
+        this.dragStartX = pos.x;
+        this.dragStartScroll = this.manualScrollOffset;
+        try { this.canvas.setPointerCapture?.(e.pointerId); } catch (_) {}
+      }
+    });
+
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this.isUserDragging) return;
+      const pos = getPos(e);
+      const deltaX = pos.x - this.dragStartX;
+      this.manualScrollOffset = this.dragStartScroll - deltaX;
+    });
+
+    const endDrag = (e) => {
+      this.isUserDragging = false;
+      try { this.canvas.releasePointerCapture?.(e.pointerId); } catch (_) {}
+    };
+
+    this.canvas.addEventListener('pointerup', endDrag);
+    this.canvas.addEventListener('pointercancel', endDrag);
+
+    this.canvas.addEventListener('wheel', (e) => {
+      if (this.options.mode === 'practice') {
+        e.preventDefault();
+        const delta = (Math.abs(e.deltaX) > 0.001 ? e.deltaX : e.deltaY) * 0.8;
+        this.manualScrollOffset += delta;
+      }
+    }, { passive: false });
+  }
+
+  getMistakeNoteIndices() {
+    if (!this.practiceData || !this.practiceData.melody || !this.practiceData.noteResults) return [];
+    const indices = [];
+    const results = this.practiceData.noteResults;
+    for (let i = 0; i < results.length && i < this.practiceData.melody.notes.length; i++) {
+      if (results[i].mistakes > 0 || results[i].status === 'mistake' || results[i].status === 'missed') {
+        indices.push(i);
+      }
+    }
+    return indices;
+  }
+
+  jumpToMistake(mistakeIndex) {
+    this.activeReviewMistakeIndex = mistakeIndex;
+    this.manualScrollOffset = 0;
+    this.notifyReviewNoteChanged();
+  }
+
+  nextMistake() {
+    const mistakes = this.getMistakeNoteIndices();
+    if (mistakes.length === 0) return;
+    const next = mistakes.find(idx => idx > this.activeReviewMistakeIndex);
+    this.activeReviewMistakeIndex = (next !== undefined) ? next : mistakes[0];
+    this.manualScrollOffset = 0;
+    this.notifyReviewNoteChanged();
+  }
+
+  previousMistake() {
+    const mistakes = this.getMistakeNoteIndices();
+    if (mistakes.length === 0) return;
+    const prev = [...mistakes].reverse().find(idx => idx < this.activeReviewMistakeIndex);
+    this.activeReviewMistakeIndex = (prev !== undefined) ? prev : mistakes[mistakes.length - 1];
+    this.manualScrollOffset = 0;
+    this.notifyReviewNoteChanged();
+  }
+
+  notifyReviewNoteChanged() {
+    if (this.onReviewNoteChanged && this.practiceData && this.practiceData.melody && this.activeReviewMistakeIndex >= 0) {
+      const melody = this.practiceData.melody;
+      if (this.activeReviewMistakeIndex < melody.notes.length) {
+        const targetNote = melody.notes[this.activeReviewMistakeIndex];
+        const res = (this.practiceData.noteResults && this.practiceData.noteResults[this.activeReviewMistakeIndex]) || null;
+        this.onReviewNoteChanged({
+          index: this.activeReviewMistakeIndex,
+          targetMidi: targetNote.midi,
+          targetNote,
+          wrongMidi: res ? res.lastWrongMidi : null,
+          mistakes: res ? res.mistakes : 0,
+          timing: res ? res.timing : null
+        });
+      }
+    }
   }
 
   /**
@@ -162,24 +310,28 @@ export class NotationRenderer {
     const staffBarColor  = isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(15, 23, 42, 0.55)';
     const clefColor      = isDark ? '#e2e8f0' : '#1e293b';
 
-    // Layout dimensions
-    const lineSpacing = this.options.lineSpacing;
+    // Layout dimensions: dynamically scales with canvas height and width
+    const isMobile = w < 640;
+    const lineSpacing = Math.max(11, Math.min(16, Math.round(h * 0.040)));
     const staffHeight = lineSpacing * 4;
     const staffGap = lineSpacing * 4.5; // Gap between treble bottom line & bass top line
     const totalGrandStaffHeight = staffHeight * 2 + staffGap;
 
-    const startY = Math.max(25, (h - totalGrandStaffHeight) / 2);
+    const startY = Math.max(isMobile ? 32 : 36, (h - totalGrandStaffHeight) / 2);
     const trebleTopY = startY;
     const trebleBottomY = trebleTopY + staffHeight;
     const bassTopY = trebleBottomY + staffGap;
     const bassBottomY = bassTopY + staffHeight;
 
-    const marginX = 70;
+    const marginX = isMobile ? 18 : 50;
     const staffWidth = w - marginX * 2;
 
     // Draw Grand Staff infrastructure
     this.drawGrandStaffLines(ctx, marginX, staffWidth, trebleTopY, bassTopY, lineSpacing, staffLineColor, staffBarColor);
-    this.drawClefs(ctx, marginX + 16, trebleTopY, bassTopY, lineSpacing, clefColor);
+
+    if (this.options.mode !== 'practice') {
+      this.drawClefs(ctx, marginX + (isMobile ? 14 : 20), trebleTopY, bassTopY, lineSpacing, clefColor);
+    }
 
     // Clean up faded notes older than 450ms
     for (const [midi, note] of this.fadingNotes.entries()) {
@@ -784,9 +936,26 @@ export class NotationRenderer {
    * Set active practice state from Trainer
    */
   setPracticeState(data) {
+    const melodyChanged = (!this.practiceData && data) || (this.practiceData && data && this.practiceData.melody?.id !== data.melody?.id);
+    const becameFinished = (!this.practiceData?.isFinished && data?.isFinished);
+
     this.practiceData = data;
     if (data) {
       this.options.mode = 'practice';
+    }
+
+    if (melodyChanged) {
+      this.activeReviewMistakeIndex = -1;
+      this.manualScrollOffset = 0;
+    }
+
+    if (becameFinished) {
+      this.manualScrollOffset = 0;
+      const mistakes = this.getMistakeNoteIndices();
+      if (mistakes.length > 0) {
+        this.activeReviewMistakeIndex = mistakes[0];
+        this.notifyReviewNoteChanged();
+      }
     }
   }
 
@@ -795,7 +964,96 @@ export class NotationRenderer {
   }
 
   /**
-   * Render Interactive Melody Practice Sheet Music Mode
+   * Draw active played notes in dedicated Live INPUT column
+   */
+  drawActivePlayedNotes(ctx, targetX, trebleBottomY, bassBottomY, lineSpacing) {
+    if (this.activeNotes.size === 0) return;
+
+    const count = this.activeNotes.size;
+    let idx = 0;
+    const preferFlats = this.options.preferFlats;
+    const stepHeight = lineSpacing * 0.5;
+
+    const targetNote = this.practiceData ? (this.practiceData.melody?.notes[this.practiceData.noteIndex] || null) : null;
+    const prevNote = (this.practiceData && this.practiceData.noteIndex > 0)
+      ? (this.practiceData.melody?.notes[this.practiceData.noteIndex - 1] || null)
+      : null;
+
+    for (const [midi, noteData] of this.activeNotes.entries()) {
+      const info = MusicTheory.getNoteInfo(midi, preferFlats);
+      const isTreble = midi >= this.options.splitPoint;
+      const clef = isTreble ? 'treble' : 'bass';
+      const staffPos = MusicTheory.getStaffPosition(info.diatonicStep, clef);
+      const bottomY = isTreble ? trebleBottomY : bassBottomY;
+      const noteY = bottomY - staffPos * stepHeight;
+
+      const headW = lineSpacing * 1.35;
+      const headH = lineSpacing * 0.95;
+
+      const xOffset = (count > 1) ? (idx - (count - 1) * 0.5) * 24 : 0;
+      const noteX = targetX + xOffset;
+
+      let color = '#38bdf8'; // Electric Sky 400 default
+
+      if (this.practiceData && !this.practiceData.isFinished) {
+        if ((targetNote && midi === targetNote.midi) || (prevNote && midi === prevNote.midi)) {
+          color = '#22c55e'; // Emerald 500 (correct note hit)
+        } else {
+          color = '#f43f5e'; // Rose 500 (wrong note struck)
+        }
+      }
+
+      // Ledger lines
+      this.drawLedgerLines(ctx, noteX, staffPos, bottomY, lineSpacing);
+
+      ctx.save();
+
+      // Radiant pulse glow
+      ctx.beginPath();
+      ctx.arc(noteX, noteY, headW * 0.9, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+
+      // Notehead (tilted)
+      ctx.beginPath();
+      ctx.ellipse(noteX, noteY, headW * 0.5, headH * 0.5, -0.28, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      // Stem
+      const stemUp = staffPos < 4;
+      const stemX = stemUp ? (noteX + headW * 0.40) : (noteX - headW * 0.40);
+      const stemLen = lineSpacing * 3.2;
+      const stemEndY = stemUp ? (noteY - stemLen) : (noteY + stemLen);
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(stemX, noteY);
+      ctx.lineTo(stemX, stemEndY);
+      ctx.stroke();
+
+      // Accidental
+      if (info.accidental) {
+        this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: true, clef }, lineSpacing, 1.0);
+      }
+
+      // Active pitch tag
+      ctx.font = '700 11px "Inter", sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelY = stemUp ? (noteY + lineSpacing * 1.1) : (noteY - lineSpacing * 1.4);
+      ctx.fillText(info.fullName, noteX, labelY);
+
+      ctx.restore();
+      idx++;
+    }
+  }
+
+  /**
+   * Render Interactive Melody Practice Sheet Music Mode with VST3 Parity
    */
   renderPracticeMode(ctx, staffX, staffWidth, trebleBottomY, bassBottomY, lineSpacing, timestamp) {
     if (!this.practiceData || !this.practiceData.melody) {
@@ -803,25 +1061,214 @@ export class NotationRenderer {
       return;
     }
 
+    this.noteHitboxes = [];
+    const isDark = this.options.theme === 'dark';
+    const preferFlats = this.options.preferFlats;
+    const isMobile = this.width < 640;
+
     const melody = this.practiceData.melody;
     const currentIdx = this.practiceData.noteIndex;
     const results = this.practiceData.noteResults || [];
-    const preferFlats = this.options.preferFlats;
-    const isDark = this.options.theme === 'dark';
-
-    // 1. Draw Time Signature after Clefs
-    const timeSigX = staffX + 54;
-    this.drawTimeSignature(ctx, timeSigX, trebleBottomY, bassBottomY, lineSpacing, melody.timeSignature);
-
-    // 2. Precompute Generous Non-Linear Duration Spacing & Measure Barlines
-    const notesStartX = staffX + 100;
-    const availableWidth = staffWidth - 120;
+    const isFinished = !!this.practiceData.isFinished;
     const totalNotes = melody.notes.length;
-    const beatsPerMeasure = melody.timeSignature[0] || 4;
+    const timeSig = melody.timeSignature || [4, 4];
+    const beatsPerMeasure = timeSig[0] || 4;
+
+    const trebleTopY = trebleBottomY - lineSpacing * 4;
+    const bassTopY = bassBottomY - lineSpacing * 4;
+
+    const mistakeIndices = this.getMistakeNoteIndices();
+    const hasMistakes = mistakeIndices.length > 0;
+
+    // Auto-focus first mistake upon melody finish if none selected
+    if (isFinished && hasMistakes && (this.activeReviewMistakeIndex === -1 || !mistakeIndices.includes(this.activeReviewMistakeIndex))) {
+      this.activeReviewMistakeIndex = mistakeIndices[0];
+      this.notifyReviewNoteChanged();
+    }
+
+    // 1. Staff Header Controls & Banner
+    const headerY = Math.max(10, trebleTopY - 26);
+    const staffRightX = staffX + staffWidth;
+
+    if (isFinished && hasMistakes) {
+      // Header Review Navigation Controls
+      const curOrder = mistakeIndices.indexOf(this.activeReviewMistakeIndex) + 1;
+      const totalM = mistakeIndices.length;
+
+      const btnW = 28;
+      const btnH = 20;
+      const pillW = 104;
+      const groupW = btnW + 6 + pillW + 6 + btnW;
+      const groupX = staffRightX - groupW;
+
+      this.prevMistakeBtnBounds = { x: groupX, y: headerY, width: btnW, height: btnH };
+      this.reviewPillBounds = { x: groupX + btnW + 6, y: headerY, width: pillW, height: btnH };
+      this.nextMistakeBtnBounds = { x: groupX + btnW + 6 + pillW + 6, y: headerY, width: btnW, height: btnH };
+
+      // Prev Button
+      ctx.save();
+      ctx.fillStyle = isDark ? '#1e293b' : '#e2e8f0';
+      ctx.strokeStyle = isDark ? '#475569' : '#cbd5e1';
+      ctx.lineWidth = 1;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(this.prevMistakeBtnBounds.x, this.prevMistakeBtnBounds.y, btnW, btnH, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(this.prevMistakeBtnBounds.x, this.prevMistakeBtnBounds.y, btnW, btnH);
+      }
+      // Left Arrow
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      const pcx = this.prevMistakeBtnBounds.x + btnW / 2;
+      const pcy = this.prevMistakeBtnBounds.y + btnH / 2;
+      ctx.moveTo(pcx + 3, pcy - 4);
+      ctx.lineTo(pcx + 3, pcy + 4);
+      ctx.lineTo(pcx - 3, pcy);
+      ctx.closePath();
+      ctx.fill();
+
+      // Review Pill Badge
+      ctx.fillStyle = 'rgba(244, 63, 94, 0.2)';
+      ctx.strokeStyle = '#f43f5e';
+      ctx.lineWidth = 1;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(this.reviewPillBounds.x, this.reviewPillBounds.y, pillW, btnH, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(this.reviewPillBounds.x, this.reviewPillBounds.y, pillW, btnH);
+      }
+      ctx.font = '700 10.5px "Inter", sans-serif';
+      ctx.fillStyle = '#fb7185';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Review ${curOrder || 1} of ${totalM}`, this.reviewPillBounds.x + pillW / 2, this.reviewPillBounds.y + btnH / 2);
+
+      // Next Button
+      ctx.fillStyle = isDark ? '#1e293b' : '#e2e8f0';
+      ctx.strokeStyle = isDark ? '#475569' : '#cbd5e1';
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(this.nextMistakeBtnBounds.x, this.nextMistakeBtnBounds.y, btnW, btnH, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(this.nextMistakeBtnBounds.x, this.nextMistakeBtnBounds.y, btnW, btnH);
+      }
+      // Right Arrow
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      const ncx = this.nextMistakeBtnBounds.x + btnW / 2;
+      const ncy = this.nextMistakeBtnBounds.y + btnH / 2;
+      ctx.moveTo(ncx - 3, ncy - 4);
+      ctx.lineTo(ncx - 3, ncy + 4);
+      ctx.lineTo(ncx + 3, ncy);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    } else {
+      this.prevMistakeBtnBounds = null;
+      this.nextMistakeBtnBounds = null;
+      this.reviewPillBounds = null;
+
+      // Regular note progress badge in header
+      ctx.save();
+      ctx.font = '700 11px "Inter", sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      const progressStr = isFinished ? '🎉 Complete' : `Note ${Math.min(currentIdx + 1, totalNotes)} of ${totalNotes}`;
+      ctx.fillText(progressStr, staffRightX, headerY + 8);
+      ctx.restore();
+    }
+
+    // 2. Clefs, Time Signature, and Section Divider
+    const clefX = staffX + (isMobile ? 14 : 20);
+    this.drawClefs(ctx, clefX, trebleTopY, bassTopY, lineSpacing, isDark ? '#e2e8f0' : '#1e293b');
+
+    const timeSigX = staffX + (isMobile ? 42 : 54);
+    this.drawTimeSignature(ctx, timeSigX, trebleBottomY, bassBottomY, lineSpacing, timeSig);
+
+    // Section barline separating clefs/time sig from the dedicated INPUT column
+    const clefDividerX = staffX + (isMobile ? 66 : 82);
+    ctx.save();
+    ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.4)' : 'rgba(15, 23, 42, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(clefDividerX, trebleTopY);
+    ctx.lineTo(clefDividerX, trebleBottomY);
+    ctx.moveTo(clefDividerX, bassTopY);
+    ctx.lineTo(clefDividerX, bassBottomY);
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. Dedicated Live MIDI INPUT Column
+    const inputColumnX = staffX + (isMobile ? 94 : 116);
+    const targetMelodyNote = melody.notes[currentIdx] || null;
+
+    let inputColor = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(100, 116, 139, 0.5)';
+    if (this.activeNotes.size > 0) {
+      if (!isFinished) {
+        let anyMatch = false;
+        for (const midi of this.activeNotes.keys()) {
+          if ((targetMelodyNote && midi === targetMelodyNote.midi) ||
+              (currentIdx > 0 && midi === melody.notes[currentIdx - 1]?.midi)) {
+            anyMatch = true;
+            break;
+          }
+        }
+        inputColor = anyMatch ? '#22c55e' : '#f43f5e';
+      } else {
+        inputColor = '#38bdf8';
+      }
+    }
+
+    // INPUT column header label
+    ctx.save();
+    ctx.font = '800 9.5px "Inter", sans-serif';
+    ctx.fillStyle = inputColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('INPUT', inputColumnX, trebleTopY - lineSpacing * 0.4);
+
+    // INPUT column subtle vertical guide line
+    ctx.strokeStyle = inputColor;
+    ctx.lineWidth = 1.0;
+    ctx.globalAlpha = this.activeNotes.size > 0 ? 0.5 : 0.18;
+    ctx.beginPath();
+    ctx.moveTo(inputColumnX, trebleTopY - lineSpacing * 0.2);
+    ctx.lineTo(inputColumnX, bassBottomY + lineSpacing * 0.2);
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+    ctx.restore();
+
+    // Draw active played MIDI notes in this dedicated Live Input column
+    this.drawActivePlayedNotes(ctx, inputColumnX, trebleBottomY, bassBottomY, lineSpacing);
+
+    // Section barline separating Live Input column from Scrolling Melody Score
+    const scoreDividerX = staffX + (isMobile ? 122 : 148);
+    ctx.save();
+    ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.55)' : 'rgba(15, 23, 42, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(scoreDividerX, trebleTopY);
+    ctx.lineTo(scoreDividerX, trebleBottomY);
+    ctx.moveTo(scoreDividerX, bassTopY);
+    ctx.lineTo(scoreDividerX, bassBottomY);
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. Precompute Generous Non-Linear Duration Spacing & Measure Barlines
+    const notesStartX = scoreDividerX + (isMobile ? 18 : 26);
+    const availableWidth = staffRightX - notesStartX - 12;
 
     const noteXPositions = [];
     const barlineXPositions = [];
-    let curX = notesStartX + 24;
+    let curX = notesStartX + 20;
     let currentMeasureBeats = 0;
 
     melody.notes.forEach((note, i) => {
@@ -829,17 +1276,13 @@ export class NotationRenderer {
 
       if (i > 0) {
         const prevNote = melody.notes[i - 1];
-        // Non-linear duration spacing: minimum 72px, scaled up with duration
-        let spacing = Math.max(72, 90 * Math.pow(Math.max(0.25, prevNote.duration), 0.55));
+        let spacing = Math.max(isMobile ? 58 : 72, (isMobile ? 74 : 90) * Math.pow(Math.max(0.25, prevNote.duration), 0.55));
+        if (info.accidental) spacing += 16;
 
-        // Extra clearance for accidentals
-        if (info.accidental) spacing += 18;
-
-        // Measure boundary check
         if (currentMeasureBeats + prevNote.duration >= beatsPerMeasure - 0.01) {
           const barX = curX + spacing * 0.5;
           barlineXPositions.push(barX);
-          spacing += 32;
+          spacing += 28;
           currentMeasureBeats = (currentMeasureBeats + prevNote.duration) % beatsPerMeasure;
         } else {
           currentMeasureBeats += prevNote.duration;
@@ -847,7 +1290,7 @@ export class NotationRenderer {
 
         curX += spacing;
       } else {
-        if (info.accidental) curX += 16;
+        if (info.accidental) curX += 14;
       }
 
       noteXPositions.push(curX);
@@ -855,62 +1298,72 @@ export class NotationRenderer {
 
     if (noteXPositions.length > 0) {
       const lastNote = melody.notes[melody.notes.length - 1];
-      const lastSpacing = Math.max(72, 90 * Math.pow(Math.max(0.25, lastNote.duration), 0.55));
+      const lastSpacing = Math.max(65, 85 * Math.pow(Math.max(0.25, lastNote.duration), 0.55));
       barlineXPositions.push(noteXPositions[noteXPositions.length - 1] + lastSpacing * 0.75);
     }
 
-    // Dynamic smooth focal scrolling (anchors target note at ~30% from left)
-    const totalMelodyWidth = noteXPositions.length > 0 ? (noteXPositions[noteXPositions.length - 1] - notesStartX + 140) : availableWidth;
+    // Dynamic focal scrolling & drag offset
+    const totalMelodyWidth = noteXPositions.length > 0 ? (noteXPositions[noteXPositions.length - 1] - notesStartX + 120) : availableWidth;
     let scrollX = 0;
+
     if (totalMelodyWidth > availableWidth) {
-      const activeX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
-      const targetFocusX = notesStartX + availableWidth * 0.30;
-      scrollX = Math.max(0, activeX - targetFocusX);
-      const maxScroll = totalMelodyWidth - availableWidth + 40;
+      if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
+        const mistakeX = noteXPositions[this.activeReviewMistakeIndex];
+        const focusX = notesStartX + availableWidth * 0.38;
+        scrollX = Math.max(0, mistakeX - focusX);
+      } else {
+        const activeX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
+        const focusX = notesStartX + availableWidth * 0.28;
+        scrollX = Math.max(0, activeX - focusX);
+      }
+      const maxScroll = Math.max(0, totalMelodyWidth - availableWidth + 40);
       scrollX = Math.min(scrollX, maxScroll);
     }
 
+    // Apply manual drag / wheel offset
+    const maxScrollLimit = Math.max(0, totalMelodyWidth - availableWidth + 40);
+    scrollX = Math.max(0, Math.min(maxScrollLimit, scrollX + this.manualScrollOffset));
+
     const labelBaselineY = bassBottomY + lineSpacing * 1.05;
 
-    // Clip rendering area to prevent drawing over clefs or outside staff
+    // Clip rendering area to prevent drawing over clefs or INPUT column
     ctx.save();
     ctx.beginPath();
-    ctx.rect(staffX + 80, 0, availableWidth + 30, this.height);
+    ctx.rect(notesStartX - 6, 0, availableWidth + 22, this.height);
     ctx.clip();
 
-    // 3. Draw Measure Barlines with Measure Numbers
+    // 5. Draw Measure Barlines with Measure Numbers
     barlineXPositions.forEach((barXRaw, m) => {
       const barX = barXRaw - scrollX;
-      if (barX < staffX + 60 || barX > staffX + staffWidth + 60) return;
+      if (barX < notesStartX - 40 || barX > staffRightX + 40) return;
 
       const isLast = (m === barlineXPositions.length - 1);
       ctx.save();
       if (isLast) {
         // Double barline
-        ctx.strokeStyle = isDark ? 'rgba(203, 213, 225, 0.7)' : 'rgba(15, 23, 42, 0.7)';
+        ctx.strokeStyle = isDark ? 'rgba(203, 213, 225, 0.75)' : 'rgba(15, 23, 42, 0.75)';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.moveTo(barX - 5, trebleBottomY - lineSpacing * 4);
+        ctx.moveTo(barX - 5, trebleTopY);
         ctx.lineTo(barX - 5, trebleBottomY);
-        ctx.moveTo(barX - 5, bassBottomY - lineSpacing * 4);
+        ctx.moveTo(barX - 5, bassTopY);
         ctx.lineTo(barX - 5, bassBottomY);
         ctx.stroke();
 
         ctx.lineWidth = 3.5;
         ctx.beginPath();
-        ctx.moveTo(barX, trebleBottomY - lineSpacing * 4);
+        ctx.moveTo(barX, trebleTopY);
         ctx.lineTo(barX, trebleBottomY);
-        ctx.moveTo(barX, bassBottomY - lineSpacing * 4);
+        ctx.moveTo(barX, bassTopY);
         ctx.lineTo(barX, bassBottomY);
         ctx.stroke();
       } else {
-        // Standard barline
         ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(15, 23, 42, 0.35)';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.moveTo(barX, trebleBottomY - lineSpacing * 4);
+        ctx.moveTo(barX, trebleTopY);
         ctx.lineTo(barX, trebleBottomY);
-        ctx.moveTo(barX, bassBottomY - lineSpacing * 4);
+        ctx.moveTo(barX, bassTopY);
         ctx.lineTo(barX, bassBottomY);
         ctx.stroke();
 
@@ -921,7 +1374,7 @@ export class NotationRenderer {
         ctx.fillStyle = isDark ? '#1e293b' : '#e2e8f0';
         const numW = 18;
         const numH = 13;
-        const pillY = trebleBottomY - lineSpacing * 4 - 15;
+        const pillY = trebleTopY - 15;
         if (ctx.roundRect) {
           ctx.beginPath();
           ctx.roundRect(barX - numW / 2, pillY, numW, numH, 3);
@@ -935,12 +1388,23 @@ export class NotationRenderer {
       ctx.restore();
     });
 
-    // 4. Render Melody Notes
+    // 6. Render Melody Notes & Mistake Feedback
     melody.notes.forEach((note, i) => {
       const noteX = noteXPositions[i] - scrollX;
 
-      // Skip notes off-screen
-      if (noteX < staffX + 50 || noteX > staffX + staffWidth + 60) return;
+      // Record note hitbox for direct clicking
+      this.noteHitboxes.push({
+        bounds: {
+          x: noteX - 16,
+          y: trebleTopY - 24,
+          width: 32,
+          height: (bassBottomY - trebleTopY) + 48
+        },
+        index: i
+      });
+
+      // Skip notes far off screen
+      if (noteX < notesStartX - 60 || noteX > staffRightX + 60) return;
 
       const info = MusicTheory.getNoteInfo(note.midi, preferFlats);
       const clef = note.midi >= this.options.splitPoint ? 'treble' : 'bass';
@@ -948,28 +1412,53 @@ export class NotationRenderer {
       const bottomY = clef === 'treble' ? trebleBottomY : bassBottomY;
       const noteY = bottomY - staffPos * (lineSpacing / 2);
 
-      const isTarget = i === currentIdx && !this.practiceData.isFinished;
+      const isTarget = i === currentIdx && !isFinished;
       const isPast = i < currentIdx;
-      const result = results[i];
+      const isReviewActive = isFinished && i === this.activeReviewMistakeIndex;
+
+      const res = results[i] || null;
+      const hadMistakes = res && (res.mistakes > 0 || res.status === 'mistake' || res.status === 'missed');
+      const wrongMidi = res ? res.lastWrongMidi : null;
+      const wrongInfo = wrongMidi !== null ? MusicTheory.getNoteInfo(wrongMidi, preferFlats) : null;
+      const wrongName = wrongInfo ? wrongInfo.fullName : '?';
 
       // Draw Ledger Lines
       this.drawLedgerLines(ctx, noteX, staffPos, bottomY, lineSpacing);
 
-      // Determine colors & styling
+      // Determine note color
       let noteColor;
       const isHollow = note.duration >= 2;
       const isWhole = note.duration >= 4;
 
-      if (isPast) {
-        if (result && result.mistakes === 0) {
-          noteColor = '#22c55e'; // Clean Green
-        } else {
-          noteColor = '#f59e0b'; // Amber
-        }
+      if (isReviewActive) {
+        noteColor = '#f43f5e'; // Vibrant Rose for active mistake review
       } else if (isTarget) {
-        noteColor = '#38bdf8'; // Electric Sky
+        noteColor = '#38bdf8'; // Electric Sky for target
+      } else if (isPast) {
+        if (hadMistakes) {
+          noteColor = '#f43f5e'; // Rose if mistake was made
+        } else if (res && res.timing && Math.abs(res.timing.offsetMs) > 100) {
+          noteColor = '#f59e0b'; // Amber for loose timing
+        } else {
+          noteColor = '#22c55e'; // Clean Green
+        }
       } else {
-        noteColor = isDark ? '#e2e8f0' : '#1e293b'; // Crisp readable white/dark
+        noteColor = isDark ? '#e2e8f0' : '#1e293b'; // Slate readable
+      }
+
+      // Review Active Beacon Pulse
+      if (isReviewActive) {
+        const pulse = 0.5 + 0.5 * Math.sin(timestamp / 130);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(noteX, noteY, (lineSpacing * 1.1) + pulse * 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#f43f5e';
+        ctx.globalAlpha = 0.22 + pulse * 0.18;
+        ctx.fill();
+        ctx.lineWidth = 2.0;
+        ctx.strokeStyle = '#fb7185';
+        ctx.stroke();
+        ctx.restore();
       }
 
       // Target note pulse halo & caret
@@ -977,8 +1466,8 @@ export class NotationRenderer {
         const isFlashingRed = this.flashMistakeTimestamp && (timestamp - this.flashMistakeTimestamp < 420);
         const glowColor = isFlashingRed ? '#ef4444' : '#38bdf8';
 
-        // Animated pulsing halo
         const pulse = 0.5 + 0.5 * Math.sin(timestamp / 140);
+        ctx.save();
         ctx.beginPath();
         ctx.arc(noteX, noteY, (lineSpacing * 0.95) + pulse * 5, 0, Math.PI * 2);
         ctx.fillStyle = glowColor;
@@ -986,35 +1475,108 @@ export class NotationRenderer {
         ctx.fill();
         ctx.globalAlpha = 1.0;
 
-        // Target Caret Cursor (pointing down to note)
-        const caretY = (clef === 'treble' ? trebleBottomY - lineSpacing * 5.3 : bassBottomY - lineSpacing * 5.3);
+        // Downward target caret
+        const caretY = trebleTopY - lineSpacing * 1.2;
         ctx.fillStyle = glowColor;
         ctx.beginPath();
-        ctx.moveTo(noteX, caretY + 8);
-        ctx.lineTo(noteX - 5.5, caretY);
-        ctx.lineTo(noteX + 5.5, caretY);
+        ctx.moveTo(noteX, caretY + 7);
+        ctx.lineTo(noteX - 5, caretY);
+        ctx.lineTo(noteX + 5, caretY);
         ctx.closePath();
         ctx.fill();
+        ctx.restore();
       }
 
-      // Draw Note Stem (unless whole note)
+      // Draw Note Stem
       if (!isWhole) {
         const stemDir = staffPos >= 4 ? 'down' : 'up';
         const rx = lineSpacing * 0.62;
         const stemLen = lineSpacing * 3.4;
+        const stemX = stemDir === 'up' ? (noteX + rx * 0.88) : (noteX - rx * 0.88);
+        const stemEndY = stemDir === 'up' ? (noteY - stemLen) : (noteY + stemLen);
 
         ctx.save();
         ctx.lineWidth = 1.8;
         ctx.strokeStyle = noteColor;
         ctx.beginPath();
-        if (stemDir === 'up') {
-          ctx.moveTo(noteX + rx * 0.88, noteY);
-          ctx.lineTo(noteX + rx * 0.88, noteY - stemLen);
-        } else {
-          ctx.moveTo(noteX - rx * 0.88, noteY);
-          ctx.lineTo(noteX - rx * 0.88, noteY + stemLen);
-        }
+        ctx.moveTo(stemX, noteY);
+        ctx.lineTo(stemX, stemEndY);
         ctx.stroke();
+
+        // Eighth Note Flag (duration <= 0.55) & 16th Note Double Flag (duration <= 0.28) - VST3 Parity
+        if (note.duration <= 0.55) {
+          ctx.fillStyle = noteColor;
+          ctx.beginPath();
+          if (stemDir === 'up') {
+            ctx.moveTo(stemX, stemEndY);
+            ctx.bezierCurveTo(
+              stemX + lineSpacing * 1.1, stemEndY + lineSpacing * 0.8,
+              stemX + lineSpacing * 0.9, stemEndY + lineSpacing * 2.0,
+              stemX, stemEndY + lineSpacing * 2.2
+            );
+            ctx.lineTo(stemX, stemEndY + lineSpacing * 1.7);
+            ctx.bezierCurveTo(
+              stemX + lineSpacing * 0.6, stemEndY + lineSpacing * 1.4,
+              stemX + lineSpacing * 0.7, stemEndY + lineSpacing * 0.7,
+              stemX, stemEndY + lineSpacing * 0.5
+            );
+            ctx.closePath();
+            ctx.fill();
+
+            if (note.duration <= 0.28) {
+              const f2Y = stemEndY + lineSpacing * 0.75;
+              ctx.beginPath();
+              ctx.moveTo(stemX, f2Y);
+              ctx.bezierCurveTo(
+                stemX + lineSpacing * 1.1, f2Y + lineSpacing * 0.8,
+                stemX + lineSpacing * 0.9, f2Y + lineSpacing * 2.0,
+                stemX, f2Y + lineSpacing * 2.2
+              );
+              ctx.lineTo(stemX, f2Y + lineSpacing * 1.7);
+              ctx.bezierCurveTo(
+                stemX + lineSpacing * 0.6, f2Y + lineSpacing * 1.4,
+                stemX + lineSpacing * 0.7, f2Y + lineSpacing * 0.7,
+                stemX, f2Y + lineSpacing * 0.5
+              );
+              ctx.closePath();
+              ctx.fill();
+            }
+          } else {
+            ctx.moveTo(stemX, stemEndY);
+            ctx.bezierCurveTo(
+              stemX + lineSpacing * 1.1, stemEndY - lineSpacing * 0.8,
+              stemX + lineSpacing * 0.9, stemEndY - lineSpacing * 2.0,
+              stemX, stemEndY - lineSpacing * 2.2
+            );
+            ctx.lineTo(stemX, stemEndY - lineSpacing * 1.7);
+            ctx.bezierCurveTo(
+              stemX + lineSpacing * 0.6, stemEndY - lineSpacing * 1.4,
+              stemX + lineSpacing * 0.7, stemEndY - lineSpacing * 0.7,
+              stemX, stemEndY - lineSpacing * 0.5
+            );
+            ctx.closePath();
+            ctx.fill();
+
+            if (note.duration <= 0.28) {
+              const f2Y = stemEndY - lineSpacing * 0.75;
+              ctx.beginPath();
+              ctx.moveTo(stemX, f2Y);
+              ctx.bezierCurveTo(
+                stemX + lineSpacing * 1.1, f2Y - lineSpacing * 0.8,
+                stemX + lineSpacing * 0.9, f2Y - lineSpacing * 2.0,
+                stemX, f2Y - lineSpacing * 2.2
+              );
+              ctx.lineTo(stemX, f2Y - lineSpacing * 1.7);
+              ctx.bezierCurveTo(
+                stemX + lineSpacing * 0.6, f2Y - lineSpacing * 1.4,
+                stemX + lineSpacing * 0.7, f2Y - lineSpacing * 0.7,
+                stemX, f2Y - lineSpacing * 0.5
+              );
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
+        }
         ctx.restore();
       }
 
@@ -1047,20 +1609,53 @@ export class NotationRenderer {
       }
       ctx.restore();
 
-      // Draw Accidental if present
-      if (info.accidental) {
-        this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: isTarget, clef }, lineSpacing, 1.0);
+      // Augmentation Dot (for 1.5, 0.75, 3.0 durations, etc. - VST3 Parity)
+      const isDotted = Math.abs(note.duration - 1.5) < 0.05 ||
+                       Math.abs(note.duration - 3.0) < 0.05 ||
+                       Math.abs(note.duration - 0.75) < 0.05;
+      if (isDotted) {
+        ctx.save();
+        const dotRadius = lineSpacing * 0.20;
+        const dotX = noteX + rx * 1.55;
+        // If note is centered on a staff line (staffPos % 2 === 0), place dot in space above
+        const onLine = (staffPos % 2 === 0);
+        const dotY = onLine ? (noteY - lineSpacing * 0.42) : noteY;
+
+        ctx.fillStyle = noteColor;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
 
-      // UNIFIED Pitch Name Label Lane (Clean horizontal baseline below the staff)
+      // Accidental
+      if (info.accidental) {
+        this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: isTarget || isReviewActive, clef }, lineSpacing, 1.0);
+      }
+
+      // Pitch Name Label Lane
       if (this.options.showNoteNames) {
         ctx.save();
-        const pillW = 34;
+        const pillW = isReviewActive ? 42 : 34;
         const pillH = 18;
         const pillX = noteX - pillW / 2;
         const pillY = labelBaselineY;
 
-        if (isTarget) {
+        if (isReviewActive) {
+          ctx.fillStyle = '#f43f5e'; // Rose 500
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+            ctx.fill();
+          } else {
+            ctx.fillRect(pillX, pillY, pillW, pillH);
+          }
+          ctx.font = '800 11px "Inter", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#0f172a'; // Deep slate contrast
+          ctx.fillText(info.fullName, noteX, pillY + pillH / 2);
+        } else if (isTarget) {
           ctx.fillStyle = '#38bdf8';
           if (ctx.roundRect) {
             ctx.beginPath();
@@ -1069,17 +1664,15 @@ export class NotationRenderer {
           } else {
             ctx.fillRect(pillX, pillY, pillW, pillH);
           }
-
-          ctx.font = '700 11px "Inter", sans-serif';
+          ctx.font = '800 11px "Inter", sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#0f172a';
           ctx.fillText(info.fullName, noteX, pillY + pillH / 2);
         } else {
           ctx.fillStyle = isDark ? '#0f172a' : '#f1f5f9';
-          ctx.strokeStyle = isPast ? (result && result.mistakes > 0 ? 'rgba(239, 68, 68, 0.5)' : 'rgba(34, 197, 94, 0.5)') : (isDark ? '#334155' : '#cbd5e1');
+          ctx.strokeStyle = isPast ? (hadMistakes ? 'rgba(244, 63, 94, 0.5)' : 'rgba(34, 197, 94, 0.5)') : (isDark ? '#334155' : '#cbd5e1');
           ctx.lineWidth = 1;
-
           if (ctx.roundRect) {
             ctx.beginPath();
             ctx.roundRect(pillX, pillY, pillW, pillH, 4);
@@ -1089,47 +1682,196 @@ export class NotationRenderer {
             ctx.fillRect(pillX, pillY, pillW, pillH);
             ctx.strokeRect(pillX, pillY, pillW, pillH);
           }
-
-          ctx.font = `600 10px "Inter", sans-serif`;
+          ctx.font = '600 10px "Inter", sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = isPast ? (result && result.mistakes > 0 ? '#f87171' : '#4ade80') : (isDark ? '#94a3b8' : '#475569');
+          ctx.fillStyle = isPast ? (hadMistakes ? '#f87171' : '#4ade80') : (isDark ? '#94a3b8' : '#475569');
           ctx.fillText(info.fullName, noteX, pillY + pillH / 2);
         }
+        ctx.restore();
+      }
+
+      // 7. Floating Mistake Callout Card & Flags
+      if (hadMistakes) {
+        if (isReviewActive) {
+          // Comprehensive Floating Callout Card above staff
+          ctx.save();
+          const calloutY = trebleTopY - lineSpacing * 1.8;
+          let calloutText = `Played ${wrongName} (Expected ${info.fullName})`;
+          if (res.mistakes > 1) {
+            calloutText += ` [${res.mistakes} tries]`;
+          }
+          if (res.timing && res.timing.offsetMs !== null) {
+            const ro = res.timing.offsetMs;
+            calloutText += ` | ${ro >= 0 ? '+' : ''}${ro}ms`;
+          }
+
+          ctx.font = '700 11px "Inter", sans-serif';
+          const textW = ctx.measureText(calloutText).width;
+          const iconSize = 13;
+          const padX = 8;
+          const cardW = padX * 2 + iconSize + 6 + textW;
+          const cardH = 22;
+          const cardX = noteX - cardW / 2;
+
+          // Card Background & Glowing Rose Border
+          ctx.fillStyle = '#0f172a'; // Deep slate
+          ctx.strokeStyle = '#f43f5e'; // Rose 500
+          ctx.lineWidth = 1.5;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(cardX, calloutY - cardH, cardW, cardH, 5);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(cardX, calloutY - cardH, cardW, cardH);
+            ctx.strokeRect(cardX, calloutY - cardH, cardW, cardH);
+          }
+
+          // Downward pointer arrow towards notehead
+          ctx.fillStyle = '#f43f5e';
+          ctx.beginPath();
+          ctx.moveTo(noteX - 5, calloutY);
+          ctx.lineTo(noteX + 5, calloutY);
+          ctx.lineTo(noteX, calloutY + 6);
+          ctx.closePath();
+          ctx.fill();
+
+          // Red badge circle with white X
+          const iconX = cardX + padX;
+          const iconY = calloutY - cardH + (cardH - iconSize) / 2;
+          ctx.beginPath();
+          ctx.arc(iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.4;
+          const ins = 3.2;
+          ctx.beginPath();
+          ctx.moveTo(iconX + ins, iconY + ins);
+          ctx.lineTo(iconX + iconSize - ins, iconY + iconSize - ins);
+          ctx.moveTo(iconX + iconSize - ins, iconY + ins);
+          ctx.lineTo(iconX + ins, iconY + iconSize - ins);
+          ctx.stroke();
+
+          // Callout Text
+          ctx.fillStyle = '#fecdd3'; // Rose 200
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(calloutText, iconX + iconSize + 6, calloutY - cardH / 2);
+          ctx.restore();
+        } else if (isFinished) {
+          // Compact mistake flag on other mistaken notes across the piece
+          ctx.save();
+          const flagY = trebleTopY - lineSpacing * 1.3;
+          const flagText = wrongName;
+          ctx.font = '700 9.5px "Inter", sans-serif';
+          const textW = ctx.measureText(flagText).width;
+          const iconSize = 10;
+          const padX = 5;
+          const flagW = padX * 2 + iconSize + 4 + textW;
+          const flagH = 16;
+          const flagX = noteX - flagW / 2;
+
+          ctx.fillStyle = '#0f172a';
+          ctx.strokeStyle = 'rgba(244, 63, 94, 0.7)';
+          ctx.lineWidth = 1;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(flagX, flagY - flagH, flagW, flagH, 4);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(flagX, flagY - flagH, flagW, flagH);
+          }
+
+          // Mini red circle with X
+          const iconX = flagX + padX;
+          const iconY = flagY - flagH + (flagH - iconSize) / 2;
+          ctx.fillStyle = '#f43f5e';
+          ctx.beginPath();
+          ctx.arc(iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.2;
+          const ins = 2.4;
+          ctx.beginPath();
+          ctx.moveTo(iconX + ins, iconY + ins);
+          ctx.lineTo(iconX + iconSize - ins, iconY + iconSize - ins);
+          ctx.moveTo(iconX + iconSize - ins, iconY + ins);
+          ctx.lineTo(iconX + ins, iconY + iconSize - ins);
+          ctx.stroke();
+
+          ctx.fillStyle = '#fb7185';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(flagText, iconX + iconSize + 4, flagY - flagH / 2);
+          ctx.restore();
+        }
+      }
+
+      // 8. Per-Note Timing Accuracy Badge (Milliseconds Offset)
+      if (isPast && !hadMistakes && res && res.timing && res.timing.offsetMs !== undefined) {
+        ctx.save();
+        const ro = res.timing.offsetMs;
+        const offStr = (ro >= 0 ? '+' : '') + ro + 'ms';
+        const badgeY = trebleTopY - lineSpacing * 1.1;
+
+        ctx.font = '700 9px "Inter", sans-serif';
+        const textW = ctx.measureText(offStr).width;
+        const badgeW = textW + 8;
+        const badgeH = 13;
+        const badgeX = noteX - badgeW / 2;
+
+        const absOff = Math.abs(ro);
+        let bgCol, borderCol, textCol;
+        if (absOff <= 65) {
+          bgCol = 'rgba(34, 197, 94, 0.2)';
+          borderCol = 'rgba(34, 197, 94, 0.7)';
+          textCol = '#86efac';
+        } else if (absOff <= 150) {
+          bgCol = 'rgba(245, 158, 11, 0.22)';
+          borderCol = 'rgba(245, 158, 11, 0.8)';
+          textCol = '#fde047';
+        } else {
+          bgCol = 'rgba(244, 63, 94, 0.22)';
+          borderCol = 'rgba(244, 63, 94, 0.8)';
+          textCol = '#fecdd3';
+        }
+
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(badgeX, badgeY - badgeH, badgeW, badgeH);
+        ctx.fillStyle = bgCol;
+        ctx.strokeStyle = borderCol;
+        ctx.lineWidth = 1;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY - badgeH, badgeW, badgeH, 3);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillRect(badgeX, badgeY - badgeH, badgeW, badgeH);
+          ctx.strokeRect(badgeX, badgeY - badgeH, badgeW, badgeH);
+        }
+
+        ctx.fillStyle = textCol;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(offStr, noteX, badgeY - badgeH / 2);
         ctx.restore();
       }
     });
 
     ctx.restore(); // end clip
-
-    // 5. Render Ghost Notes of Currently Held Keys
-    if (this.activeNotes.size > 0 && noteXPositions.length > 0) {
-      const ghostBaseX = (currentIdx >= 0 && currentIdx < noteXPositions.length) ? noteXPositions[currentIdx] : notesStartX;
-      const ghostX = ghostBaseX - scrollX;
-
-      for (const [midi, noteData] of this.activeNotes.entries()) {
-        const info = MusicTheory.getNoteInfo(midi, preferFlats);
-        const clef = midi >= this.options.splitPoint ? 'treble' : 'bass';
-        const staffPos = MusicTheory.getStaffPosition(info.diatonicStep, clef);
-        const bottomY = clef === 'treble' ? trebleBottomY : bassBottomY;
-        const y = bottomY - staffPos * (lineSpacing / 2);
-
-        ctx.save();
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
-        ctx.beginPath();
-        ctx.arc(ghostX, y, lineSpacing * 0.7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    }
   }
 
   /**
    * Draw classic musical Time Signature (e.g. 4/4, 3/4, 3/8)
    */
   drawTimeSignature(ctx, x, trebleBottomY, bassBottomY, spacing, sig) {
-    const topNum = sig[0];
-    const botNum = sig[1];
+    const topNum = sig[0] || 4;
+    const botNum = sig[1] || 4;
     const isDark = this.options.theme === 'dark';
 
     ctx.save();

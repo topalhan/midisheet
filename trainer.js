@@ -23,6 +23,8 @@ export class MelodyTrainer {
     this.countInBeat = 0;
     this.countInTotal = 4;
     this.songStartTime = null;
+    this.lastNoteTimestampMs = null;
+    this.expectedCumulativeBeats = 0;
     this.metronomeTimer = null;
     this.tempoMonitorRaf = null;
     this.currentBeatIndex = 0;
@@ -169,6 +171,8 @@ export class MelodyTrainer {
     this.isCountingIn = false;
     this.countInBeat = 0;
     this.songStartTime = null;
+    this.lastNoteTimestampMs = null;
+    this.expectedCumulativeBeats = 0;
 
     this.noteResults = this.currentMelody.notes.map(() => ({
       status: 'pending',
@@ -334,6 +338,51 @@ export class MelodyTrainer {
   }
 
   /**
+   * Re-align metronome to user's first note strike in Wait mode
+   */
+  alignMetronomeTo(anchorTime) {
+    if (!this.metronomeEnabled || this.mode === 'tempo') return;
+    this.stopMetronome();
+
+    const timeSig = this.currentMelody ? (this.currentMelody.timeSignature || [4, 4]) : [4, 4];
+    const beatsPerMeasure = timeSig[0] || 4;
+    const beatMs = (60 / this.bpm) * 1000;
+
+    // Note 0 was struck on Beat 0 (Measure 1 Beat 1); schedule next tick on Beat 2
+    this.currentBeatIndex = 1;
+    let nextTickTime = anchorTime + beatMs;
+
+    const tick = () => {
+      if (this.isFinished || this.mode !== 'wait' || !this.metronomeEnabled) {
+        this.stopMetronome();
+        return;
+      }
+
+      const now = performance.now();
+      this.lastBeatTime = now;
+
+      const beatInMeasure = (this.currentBeatIndex % beatsPerMeasure);
+      const isDownbeat = (beatInMeasure === 0);
+
+      if (this.onMetronomeTick && this.metronomeEnabled) {
+        this.onMetronomeTick(beatInMeasure, isDownbeat, {
+          isCountIn: false,
+          beat: beatInMeasure + 1,
+          total: beatsPerMeasure
+        });
+      }
+
+      this.currentBeatIndex++;
+      nextTickTime += beatMs;
+      const delay = Math.max(0, nextTickTime - performance.now());
+      this.metronomeTimer = setTimeout(tick, delay);
+    };
+
+    const initialDelay = Math.max(0, nextTickTime - performance.now());
+    this.metronomeTimer = setTimeout(tick, initialDelay);
+  }
+
+  /**
    * Monitor note progress in Tempo mode.
    * If note window has passed without being hit, auto-advance and record as missed.
    */
@@ -395,33 +444,76 @@ export class MelodyTrainer {
 
   /**
    * Evaluate timing accuracy for a played note
+   * Direct parity with VST3 C++ MelodyScorer.cpp
    */
   evaluateTiming(now) {
     const beatMs = (60 / this.bpm) * 1000;
     let delta = 0;
+    let rating, text, points;
 
-    if (this.mode === 'tempo' && this.songStartTime !== null) {
-      const currentTarget = this.noteTimeline[this.noteIndex];
-      if (!currentTarget) return { rating: 'perfect', offsetMs: 0, text: '🟢 Perfect', points: 100 };
-      const expectedTime = this.songStartTime + (currentTarget.startBeat * beatMs);
-      delta = now - expectedTime;
-    } else {
-      // In Wait mode: evaluate relative to nearest metronome beat if active
-      if (this.lastBeatTime > 0) {
-        const phase = (now - this.lastBeatTime) % beatMs;
-        delta = phase > (beatMs / 2) ? phase - beatMs : phase;
+    const target = this.getCurrentTargetNote();
+    const targetDuration = target ? (target.duration || 1) : 1;
+
+    // Note 0 initiates phrase/song timing (exact VST3 MelodyScorer parity)
+    if (this.noteIndex === 0) {
+      this.songStartTime = now;
+      this.lastNoteTimestampMs = now;
+      this.expectedCumulativeBeats = targetDuration;
+
+      // In Wait mode, re-align metronome to Note 0 downbeat if metronome is active
+      if (this.mode === 'wait' && this.metronomeEnabled) {
+        this.alignMetronomeTo(now);
       }
+
+      rating = 'perfect';
+      points = 100;
+      text = '🟢 Perfect (Start)';
+      this.stats.perfectHits++;
+      this.stats.rhythmPoints += points;
+      return { rating, offsetMs: 0, text, points };
+    }
+
+    if (this.mode === 'tempo') {
+      // In Tempo mode: lock to timeline anchored to songStartTime
+      if (this.songStartTime !== null) {
+        const currentTarget = this.noteTimeline[this.noteIndex];
+        const expectedTime = currentTarget
+          ? (this.songStartTime + (currentTarget.startBeat * beatMs))
+          : (this.songStartTime + (this.expectedCumulativeBeats * beatMs));
+        delta = now - expectedTime;
+      } else {
+        delta = 0;
+      }
+      this.lastNoteTimestampMs = now;
+      this.expectedCumulativeBeats += targetDuration;
+    } else {
+      // In Wait mode: evaluate inter-onset duration from previous note (VST3 MelodyScorer parity)
+      const prevIdx = this.noteIndex - 1;
+      const prevNote = this.currentMelody ? this.currentMelody.notes[prevIdx] : null;
+      const prevDuration = prevNote ? (prevNote.duration || 1) : 1;
+      const expectedIntervalMs = prevDuration * beatMs;
+
+      if (this.lastNoteTimestampMs !== null && this.lastNoteTimestampMs > 0) {
+        const actualIntervalMs = now - this.lastNoteTimestampMs;
+        delta = actualIntervalMs - expectedIntervalMs;
+      } else {
+        delta = 0;
+      }
+
+      this.lastNoteTimestampMs = now;
+      this.expectedCumulativeBeats += targetDuration;
     }
 
     const absDelta = Math.abs(delta);
-    let rating, text, points;
 
-    if (absDelta <= 75) {
+    // Exact VST3 MelodyScorer thresholds (65ms tight, 150ms early/late, >150ms off-beat)
+    if (absDelta <= 65) {
       rating = 'perfect';
       points = 100;
       text = `🟢 Perfect (${delta >= 0 ? '+' : ''}${Math.round(delta)}ms)`;
       this.stats.perfectHits++;
-    } else if (absDelta <= 160) {
+    } else if (absDelta <= 150) {
+      points = 75;
       if (delta < 0) {
         rating = 'early';
         text = `🟡 Early (${Math.round(delta)}ms)`;
@@ -431,16 +523,10 @@ export class MelodyTrainer {
         text = `🟡 Late (+${Math.round(delta)}ms)`;
         this.stats.lateHits++;
       }
-      points = 80;
-    } else if (absDelta <= 250) {
-      rating = 'good';
-      points = 50;
-      text = `🟠 Good (${delta >= 0 ? '+' : ''}${Math.round(delta)}ms)`;
-      this.stats.goodHits++;
     } else {
       rating = 'off_beat';
-      points = 20;
-      text = `🔴 Off-Beat (${delta >= 0 ? '+' : ''}${Math.round(delta)}ms)`;
+      points = 30;
+      text = `🔴 Off-beat (${delta >= 0 ? '+' : ''}${Math.round(delta)}ms)`;
       this.stats.offBeatHits++;
     }
 
@@ -582,21 +668,14 @@ export class MelodyTrainer {
 
     const durationSeconds = Math.round((this.stats.endTime - this.stats.startTime) / 1000);
 
-    // Calculate stars factoring mode, pitch accuracy, and rhythm accuracy
+    // Calculate stars factoring pitch accuracy and rhythm accuracy (VST3 MelodyScorer parity)
     let stars = 1;
-    if (this.mode === 'tempo') {
-      const combinedScore = Math.round((this.stats.accuracy * 0.5) + (this.stats.rhythmAccuracy * 0.5));
-      if (combinedScore >= 88) {
-        stars = 3;
-      } else if (combinedScore >= 70) {
-        stars = 2;
-      }
+    if (this.stats.accuracy >= 95 && this.stats.rhythmAccuracy >= 85) {
+      stars = 3;
+    } else if (this.stats.accuracy >= 80 && this.stats.rhythmAccuracy >= 65) {
+      stars = 2;
     } else {
-      if (this.stats.accuracy >= 90) {
-        stars = 3;
-      } else if (this.stats.accuracy >= 75) {
-        stars = 2;
-      }
+      stars = 1;
     }
 
     const summary = {
@@ -625,6 +704,43 @@ export class MelodyTrainer {
     }
   }
 
+  getMistakeIndices() {
+    const indices = [];
+    if (!this.noteResults) return indices;
+    for (let i = 0; i < this.noteResults.length; i++) {
+      if (this.noteResults[i].mistakes > 0 || this.noteResults[i].status === 'mistake' || this.noteResults[i].status === 'missed') {
+        indices.push(i);
+      }
+    }
+    return indices;
+  }
+
+  getFirstMistakeIndex() {
+    const mistakes = this.getMistakeIndices();
+    return mistakes.length > 0 ? mistakes[0] : -1;
+  }
+
+  getMistakeReviewDetails(index, preferFlats = false) {
+    if (!this.currentMelody || index < 0 || index >= this.currentMelody.notes.length) return null;
+    const targetNote = this.currentMelody.notes[index];
+    const res = this.noteResults[index] || { mistakes: 0, wrongNotes: [], lastWrongMidi: null };
+    const targetInfo = MusicTheory.getNoteInfo(targetNote.midi, preferFlats);
+    const wrongMidi = res.lastWrongMidi;
+    const wrongInfo = wrongMidi !== null ? MusicTheory.getNoteInfo(wrongMidi, preferFlats) : null;
+
+    return {
+      index,
+      targetMidi: targetNote.midi,
+      targetName: targetInfo.fullName,
+      wrongMidi,
+      wrongName: wrongInfo ? wrongInfo.fullName : '?',
+      mistakeAttempts: res.mistakes,
+      timing: res.timing,
+      offsetMs: res.timing ? res.timing.offsetMs : 0,
+      duration: targetNote.duration
+    };
+  }
+
   notifyState() {
     if (this.onStateChange) {
       this.onStateChange({
@@ -640,8 +756,10 @@ export class MelodyTrainer {
         metronomeEnabled: this.metronomeEnabled,
         isCountingIn: this.isCountingIn,
         countInBeat: this.countInBeat,
-        countInTotal: this.countInTotal
+        countInTotal: this.countInTotal,
+        mistakeIndices: this.getMistakeIndices()
       });
     }
   }
 }
+

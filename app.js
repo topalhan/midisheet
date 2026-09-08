@@ -8,7 +8,7 @@ import { MusicTheory } from './chords.js';
 import { NotationRenderer } from './notation.js?v=clean_notes_2';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js';
+import { MelodyTrainer } from './trainer.js?v=rhythm_fix_1';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
 
@@ -66,6 +66,7 @@ class App {
     this.practiceComposer = document.getElementById('practice-composer');
     this.practiceDifficultyBadge = document.getElementById('practice-difficulty-badge');
     this.practiceTargetNote = document.getElementById('practice-target-note');
+    this.practicePlayedNote = document.getElementById('practice-played-note');
     this.practiceFeedbackText = document.getElementById('practice-feedback-text');
     this.practiceStreakBadge = document.getElementById('practice-streak-badge');
     this.practiceAccuracyDisplay = document.getElementById('practice-accuracy-display');
@@ -85,6 +86,11 @@ class App {
     this.practiceProgressBar = document.getElementById('practice-progress-bar');
     this.modalMelodySelect = document.getElementById('modal-melody-select');
     this.modalScorecard = document.getElementById('modal-scorecard');
+    this.modalSettings = document.getElementById('modal-settings');
+    this.btnOpenSettings = document.getElementById('btn-open-settings');
+    this.btnCloseSettings = document.getElementById('btn-close-settings');
+    this.btnSettingsDone = document.getElementById('btn-settings-done');
+    this.btnScoreReview = document.getElementById('btn-score-review');
     this.melodyListContainer = document.getElementById('melody-list-container');
 
     // MIDI Channel Selection Modal references
@@ -114,6 +120,11 @@ class App {
       showNoteNames: true,
       mode: 'live'
     });
+
+    // Mistake review on sheet canvas callback (VST3 Parity)
+    this.notation.onReviewNoteChanged = (index) => {
+      this.updateReviewUI(index);
+    };
 
     window.addEventListener('resize', () => {
       this.notation.resize();
@@ -457,6 +468,16 @@ class App {
     this.setKeyActive(midi, true, velocity);
 
     if (this.appMode === 'practice') {
+      const playedInfo = MusicTheory.getNoteInfo(midi, this.preferFlats);
+      if (this.practicePlayedNote) {
+        this.practicePlayedNote.innerText = playedInfo.fullName;
+        const targetNote = this.trainer.getCurrentTargetNote();
+        if (targetNote && targetNote.midi === midi) {
+          this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-emerald-400';
+        } else {
+          this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-rose-400';
+        }
+      }
       // In practice mode, evaluate played note against expected melody note
       this.trainer.onNotePlayed(midi, velocity);
     } else {
@@ -511,6 +532,7 @@ class App {
       this.freeplayHud.classList.add('hidden');
       this.practiceHud.classList.remove('hidden');
 
+      this.clearReviewPianoKeys();
       // Update Notation Renderer to practice mode
       this.trainer.restart();
       this.notation.setPracticeState({
@@ -528,6 +550,7 @@ class App {
       this.practiceHud.classList.add('hidden');
       this.freeplayHud.classList.remove('hidden');
 
+      this.clearReviewPianoKeys();
       this.removeTargetKeyHint();
       this.trainer.stopMetronome();
       if (this.countInBanner) this.countInBanner.classList.add('hidden');
@@ -659,6 +682,84 @@ class App {
   removeTargetKeyHint() {
     const prevHints = this.pianoContainer.querySelectorAll('.piano-key.target-hint');
     prevHints.forEach(el => el.classList.remove('target-hint'));
+  }
+
+  /**
+   * Dual-key visual piano highlighting for mistake inspection (VST3 Parity)
+   * Target note highlighted in Emerald Green ("Target" badge)
+   * Played wrong note highlighted in Rose Red ("Played" badge)
+   */
+  setReviewPianoKeys(targetMidi, wrongMidi) {
+    this.clearReviewPianoKeys();
+    this.removeTargetKeyHint();
+
+    if (targetMidi != null) {
+      const targetEl = this.pianoContainer.querySelector(`[data-midi="${targetMidi}"]`);
+      if (targetEl) {
+        targetEl.classList.add('review-target');
+        const badge = document.createElement('div');
+        badge.className = 'key-review-badge target';
+        badge.innerText = 'Target';
+        targetEl.appendChild(badge);
+        // Smoothly scroll key into view
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }
+
+    if (wrongMidi != null && wrongMidi !== targetMidi) {
+      const wrongEl = this.pianoContainer.querySelector(`[data-midi="${wrongMidi}"]`);
+      if (wrongEl) {
+        wrongEl.classList.add('review-wrong');
+        const badge = document.createElement('div');
+        badge.className = 'key-review-badge wrong';
+        badge.innerText = 'Played';
+        wrongEl.appendChild(badge);
+      }
+    }
+  }
+
+  clearReviewPianoKeys() {
+    this.pianoContainer.querySelectorAll('.review-target, .review-wrong').forEach(el => {
+      el.classList.remove('review-target', 'review-wrong');
+    });
+    this.pianoContainer.querySelectorAll('.key-review-badge').forEach(b => b.remove());
+  }
+
+  /**
+   * Jump to mistake index on sheet music and sync HUD and Piano
+   */
+  jumpToReviewMistake(idx) {
+    if (this.appMode !== 'practice') this.setAppMode('practice');
+    this.notation.jumpToMistake(idx);
+    this.updateReviewUI(idx);
+  }
+
+  /**
+   * Update HUD and piano keys during mistake review
+   */
+  updateReviewUI(idx) {
+    const details = this.trainer.getMistakeReviewDetails(idx, this.preferFlats);
+    if (!details) return;
+
+    if (this.practiceTargetNote) {
+      this.practiceTargetNote.innerText = details.targetNote ? details.targetNote.fullName : '--';
+      this.practiceTargetNote.className = 'text-xl sm:text-2xl font-black text-emerald-400';
+    }
+    if (this.practicePlayedNote) {
+      this.practicePlayedNote.innerText = details.wrongNote ? details.wrongNote.fullName : '--';
+      this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-rose-400';
+    }
+    if (this.practiceFeedbackText) {
+      const targetName = details.targetNote ? details.targetNote.fullName : '';
+      const wrongName = details.wrongNote ? details.wrongNote.fullName : 'Wrong pitch';
+      const timeStr = details.timingOffsetMs != null ? ` (${details.timingOffsetMs > 0 ? '+' : ''}${details.timingOffsetMs}ms)` : '';
+      this.practiceFeedbackText.innerText = `Review Note #${idx + 1}: Expected ${targetName}, played ${wrongName}${timeStr} • ${details.mistakes} try`;
+      this.practiceFeedbackText.className = 'text-xs font-semibold text-amber-300';
+    }
+
+    const targetMidi = details.targetNote ? details.targetNote.midi : null;
+    const wrongMidi = details.lastWrongMidi;
+    this.setReviewPianoKeys(targetMidi, wrongMidi);
   }
 
   /**
@@ -1079,6 +1180,22 @@ class App {
       feedbackMsgEl.innerText = '💪 Good effort! Follow the metronome pulse and highlighted keys to build rhythm speed.';
     }
 
+    // Review Mistakes on Sheet button (VST3 Parity)
+    if (this.btnScoreReview) {
+      if (summary.mistakeCount > 0) {
+        this.btnScoreReview.classList.remove('hidden');
+        this.btnScoreReview.onclick = () => {
+          const firstMistake = this.trainer.getFirstMistakeIndex();
+          if (firstMistake != null) {
+            this.closeScorecard();
+            this.jumpToReviewMistake(firstMistake);
+          }
+        };
+      } else {
+        this.btnScoreReview.classList.add('hidden');
+      }
+    }
+
     // Render Mistakes Review List if there were mistakes
     const mistakesSection = document.getElementById('score-mistakes-section');
     const mistakesCountBadge = document.getElementById('score-mistakes-count-badge');
@@ -1095,12 +1212,12 @@ class App {
         summary.noteResults.forEach((res, idx) => {
           if (res && res.mistakes > 0 && summary.melody.notes[idx]) {
             const targetNote = summary.melody.notes[idx];
-            const targetInfo = MusicTheory.getNoteInfo(targetNote.midi);
-            const wrongInfo = res.lastWrongMidi ? MusicTheory.getNoteInfo(res.lastWrongMidi) : null;
+            const targetInfo = MusicTheory.getNoteInfo(targetNote.midi, this.preferFlats);
+            const wrongInfo = res.lastWrongMidi ? MusicTheory.getNoteInfo(res.lastWrongMidi, this.preferFlats) : null;
             const wrongName = wrongInfo ? wrongInfo.fullName : 'Wrong pitch';
 
             const item = document.createElement('div');
-            item.className = 'flex items-center justify-between p-2 rounded-lg bg-slate-900/80 border border-rose-900/30 text-xs';
+            item.className = 'flex items-center justify-between p-2 rounded-lg bg-slate-900/80 hover:bg-slate-800/80 border border-rose-900/30 text-xs cursor-pointer transition-colors group';
             item.innerHTML = `
               <div class="flex items-center gap-2">
                 <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 font-bold flex items-center justify-center text-[10px]">#${idx + 1}</span>
@@ -1109,20 +1226,15 @@ class App {
                   <div class="text-[10px] text-slate-400">${targetNote.duration >= 4 ? 'Whole note' : targetNote.duration >= 2 ? 'Half note' : targetNote.duration >= 1 ? 'Quarter note' : 'Eighth note'} (${res.mistakes}x wrong attempt${res.mistakes > 1 ? 's' : ''})</div>
                 </div>
               </div>
-              <button class="btn-inspect-mistake px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-semibold transition-colors" data-note-idx="${idx}">
-                View 🔍
+              <button class="btn-inspect-mistake px-2.5 py-1 rounded bg-rose-500/20 group-hover:bg-rose-500/30 text-rose-300 text-[10px] font-semibold transition-colors pointer-events-none" data-note-idx="${idx}">
+                Review 🔍
               </button>
             `;
 
-            const btnInspect = item.querySelector('.btn-inspect-mistake');
-            if (btnInspect) {
-              btnInspect.addEventListener('click', () => {
-                this.closeScorecard();
-                this.trainer.noteIndex = idx;
-                this.notation.drawMelody(summary.melody, idx, summary.melody.notes[idx], this.activeNotes, summary.noteResults, this.trainer.isFinished);
-                this.notation.triggerMistakeFlash();
-              });
-            }
+            item.addEventListener('click', () => {
+              this.closeScorecard();
+              this.jumpToReviewMistake(idx);
+            });
 
             mistakesList.appendChild(item);
           }
@@ -1372,8 +1484,35 @@ class App {
       if (e.target === this.modalScorecard) this.closeScorecard();
     });
 
+    // Settings Modal
+    this.btnOpenSettings?.addEventListener('click', () => {
+      this.modalSettings?.classList.add('open');
+    });
+    this.btnCloseSettings?.addEventListener('click', () => {
+      this.modalSettings?.classList.remove('open');
+    });
+    this.btnSettingsDone?.addEventListener('click', () => {
+      this.modalSettings?.classList.remove('open');
+    });
+    this.modalSettings?.addEventListener('click', (e) => {
+      if (e.target === this.modalSettings) this.modalSettings.classList.remove('open');
+    });
+    this.midiStatusBadge?.addEventListener('click', () => {
+      this.modalSettings?.classList.add('open');
+    });
+
+    // Piano Octave Pan buttons (Mobile / Touch Friendly)
+    const pianoWrapper = document.querySelector('.piano-scroll-wrapper');
+    document.getElementById('btn-piano-pan-left')?.addEventListener('click', () => {
+      pianoWrapper?.scrollBy({ left: -220, behavior: 'smooth' });
+    });
+    document.getElementById('btn-piano-pan-right')?.addEventListener('click', () => {
+      pianoWrapper?.scrollBy({ left: 220, behavior: 'smooth' });
+    });
+
     // Restart practice
     document.getElementById('btn-restart-practice')?.addEventListener('click', () => {
+      this.clearReviewPianoKeys();
       this.trainer.restart();
     });
 
@@ -1398,11 +1537,13 @@ class App {
     // Scorecard modal buttons
     document.getElementById('btn-score-retry')?.addEventListener('click', () => {
       this.closeScorecard();
+      this.clearReviewPianoKeys();
       this.trainer.restart();
     });
 
     document.getElementById('btn-score-next')?.addEventListener('click', () => {
       this.closeScorecard();
+      this.clearReviewPianoKeys();
       // Pick next melody in list
       const melodies = this.trainer.melodies;
       const currentIdx = melodies.findIndex(m => m.id === this.trainer.currentMelody.id);
@@ -1432,7 +1573,7 @@ class App {
     }
 
     // Device Selection
-    this.deviceSelect.addEventListener('change', (e) => {
+    this.deviceSelect?.addEventListener('change', (e) => {
       this.midi.selectDevice(e.target.value);
     });
 
@@ -1451,13 +1592,25 @@ class App {
       });
     }
 
-    // Instrument Preset
+    // Instrument Preset (with No Sound support for EWI / hardware audio)
     const presetSelect = document.getElementById('select-instrument');
-    if (presetSelect) {
-      presetSelect.addEventListener('change', (e) => {
-        this.audio.setPreset(e.target.value);
-      });
-    }
+    const presetSelectModal = document.getElementById('select-instrument-modal');
+
+    const handlePresetChange = (val) => {
+      this.audio.setPreset(val);
+      if (presetSelect && presetSelect.value !== val) presetSelect.value = val;
+      if (presetSelectModal && presetSelectModal.value !== val) presetSelectModal.value = val;
+      if (val === 'none') {
+        this.showToast('🔇 App synth muted (using hardware / EWI audio)', 'info');
+      } else {
+        const option = presetSelect?.querySelector(`option[value="${val}"]`);
+        const name = option ? option.innerText.replace(/^[^\w]+/, '') : val;
+        this.showToast(`🎹 Sound: ${name}`, 'info');
+      }
+    };
+
+    presetSelect?.addEventListener('change', (e) => handlePresetChange(e.target.value));
+    presetSelectModal?.addEventListener('change', (e) => handlePresetChange(e.target.value));
 
     // Low Latency Mode Toggle
     this.btnToggleLowLatency?.addEventListener('click', () => {

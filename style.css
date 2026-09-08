@@ -483,3 +483,117 @@ body {
   opacity: 0;
 }
 
+/* Review Mode Piano Keys (Rose for Wrong Played, Emerald for Expected Target) */
+.piano-key.white-key.review-target {
+  background: linear-gradient(to bottom, #dcfce7 0%, #bbf7d0 70%, #86efac 100%) !important;
+  border: 2px solid #22c55e !important;
+  border-bottom: 4px solid #16a34a !important;
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.6) !important;
+}
+
+.piano-key.black-key.review-target {
+  background: linear-gradient(to bottom, #065f46 0%, #059669 70%, #10b981 100%) !important;
+  border: 2px solid #34d399 !important;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.8) !important;
+}
+
+.piano-key.white-key.review-wrong {
+  background: linear-gradient(to bottom, #ffe4e6 0%, #fecdd3 70%, #fda4af 100%) !important;
+  border: 2px solid #f43f5e !important;
+  border-bottom: 4px solid #e11d48 !important;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.6) !important;
+}
+
+.piano-key.black-key.review-wrong {
+  background: linear-gradient(to bottom, #881337 0%, #be123c 70%, #f43f5e 100%) !important;
+  border: 2px solid #fb7185 !important;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.8) !important;
+}
+
+.key-review-badge {
+  position: absolute;
+  top: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.key-review-badge.target {
+  background: #15803d;
+  color: #f0fdf4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.key-review-badge.wrong {
+  background: #be123c;
+  color: #fff1f2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Mobile & Touch Responsive Enhancements */
+@media (max-width: 640px) {
+  #staff-canvas {
+    height: 270px;
+  }
+
+  .piano-container {
+    padding: 8px 10px 14px 10px;
+  }
+
+  .piano-key.white-key {
+    width: 31px;
+    height: 130px;
+  }
+
+  .piano-key.black-key {
+    width: 20px;
+    height: 82px;
+    margin-left: -10px;
+    margin-right: -10px;
+  }
+
+  .key-label .key-note-name {
+    font-size: 9px;
+  }
+
+  .key-label .key-qwerty-hint {
+    display: none;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  #staff-canvas {
+    height: 210px;
+  }
+
+  .piano-container {
+    padding: 6px 8px 10px 8px;
+  }
+
+  .piano-key.white-key {
+    width: 28px;
+    height: 100px;
+  }
+
+  .piano-key.black-key {
+    width: 17px;
+    height: 62px;
+    margin-left: -8.5px;
+    margin-right: -8.5px;
+  }
+
+  .key-label .key-note-name {
+    font-size: 8px;
+  }
+
+  .key-label .key-qwerty-hint {
+    display: none;
+  }
+}
+
+
