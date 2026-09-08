@@ -15,7 +15,7 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
 
-    void updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes = {}, bool preferFlats = false);
+    void updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes = {}, bool preferFlats = false, int reviewMistakeIndex = -1);
 
     std::function<void()> onSelectMelodyClicked;
     std::function<void()> onRestartClicked;

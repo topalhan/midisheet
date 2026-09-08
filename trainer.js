@@ -9,7 +9,8 @@ import { MusicTheory } from './chords.js';
 
 export class MelodyTrainer {
   constructor() {
-    this.melodies = MELODIES;
+    this.melodies = [...MELODIES];
+    this.loadPersistedCustomMelodies();
     this.currentMelody = null;
     this.noteIndex = 0;
     this.isFinished = false;
@@ -71,6 +72,65 @@ export class MelodyTrainer {
     this.loadMelody(this.melodies[0].id);
   }
 
+  addCustomMelody(melody) {
+    if (!melody || !melody.notes || melody.notes.length === 0) return false;
+    melody.isCustom = true;
+    const existingIdx = this.melodies.findIndex(m => m.id === melody.id);
+    if (existingIdx >= 0) {
+      this.melodies[existingIdx] = melody;
+    } else {
+      this.melodies.push(melody);
+    }
+    this.saveCustomMelodies();
+    this.loadMelody(melody.id);
+    return true;
+  }
+
+  removeCustomMelody(id) {
+    const idx = this.melodies.findIndex(m => m.id === id && m.isCustom);
+    if (idx >= 0) {
+      this.melodies.splice(idx, 1);
+      this.saveCustomMelodies();
+      if (this.currentMelody && this.currentMelody.id === id) {
+        this.loadMelody(this.melodies[0].id);
+      } else {
+        this.notifyState();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  saveCustomMelodies() {
+    try {
+      const customOnes = this.melodies.filter(m => m.isCustom);
+      localStorage.setItem('midisheet_custom_melodies', JSON.stringify(customOnes));
+    } catch (e) {
+      console.warn('Failed to persist custom melodies in localStorage:', e);
+    }
+  }
+
+  loadPersistedCustomMelodies() {
+    try {
+      const saved = localStorage.getItem('midisheet_custom_melodies');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(m => {
+            if (m && m.id && Array.isArray(m.notes) && m.notes.length > 0) {
+              m.isCustom = true;
+              if (!this.melodies.some(existing => existing.id === m.id)) {
+                this.melodies.push(m);
+              }
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load persisted custom melodies from localStorage:', e);
+    }
+  }
+
   loadMelody(id) {
     const melody = this.melodies.find(m => m.id === id) || this.melodies[0];
     this.currentMelody = melody;
@@ -113,6 +173,8 @@ export class MelodyTrainer {
     this.noteResults = this.currentMelody.notes.map(() => ({
       status: 'pending',
       mistakes: 0,
+      wrongNotes: [],
+      lastWrongMidi: null,
       playedMidi: null,
       timing: null
     }));
@@ -464,6 +526,9 @@ export class MelodyTrainer {
       // Incorrect pitch struck!
       const currentSlot = this.noteResults[this.noteIndex];
       currentSlot.mistakes++;
+      currentSlot.lastWrongMidi = midi;
+      if (!currentSlot.wrongNotes) currentSlot.wrongNotes = [];
+      currentSlot.wrongNotes.push(midi);
       currentSlot.status = 'mistake';
 
       this.stats.mistakeCount++;
@@ -545,6 +610,7 @@ export class MelodyTrainer {
       missedNotes: this.stats.missedNotes,
       correctNotes: this.stats.correctNotes,
       mistakeCount: this.stats.mistakeCount,
+      noteResults: this.noteResults,
       bestStreak: this.stats.bestStreak,
       durationSeconds,
       mode: this.mode,

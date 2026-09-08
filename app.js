@@ -5,11 +5,12 @@
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js';
+import { NotationRenderer } from './notation.js?v=clean_notes_2';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
 import { MelodyTrainer } from './trainer.js';
 import { MELODIES } from './melodies.js';
+import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
 
 class App {
   constructor() {
@@ -86,6 +87,23 @@ class App {
     this.modalScorecard = document.getElementById('modal-scorecard');
     this.melodyListContainer = document.getElementById('melody-list-container');
 
+    // MIDI Channel Selection Modal references
+    this.modalChannelSelect = document.getElementById('modal-channel-select');
+    this.channelListContainer = document.getElementById('channel-list-container');
+    this.channelModalFilename = document.getElementById('channel-modal-filename');
+    this.channelModalMeta = document.getElementById('channel-modal-meta');
+    this.btnCloseChannelModal = document.getElementById('btn-close-channel-modal');
+    this.btnCancelChannel = document.getElementById('btn-cancel-channel');
+    this.pendingMidiBuffer = null;
+    this.pendingMidiFileName = '';
+
+    // MIDI File Upload & Drag-and-Drop references
+    this.btnLoadMidi = document.getElementById('btn-load-midi');
+    this.midiFileInput = document.getElementById('midi-file-input');
+    this.midiModalDropzone = document.getElementById('midi-modal-dropzone');
+    this.dropOverlay = document.getElementById('drop-overlay');
+    this.toastContainer = document.getElementById('toast-container');
+
     this.init();
   }
 
@@ -108,6 +126,7 @@ class App {
     this.setupMidiEvents();
     this.setupTrainerEvents();
     this.setupUIEventListeners();
+    this.setupMidiFileLoader();
     this.populateMelodyModal();
     this.setWindMode(true);
 
@@ -643,14 +662,17 @@ class App {
   }
 
   /**
-   * Populate Melody Selection Modal with 10 melodies
+   * Populate Melody Selection Modal with built-in and imported melodies
    */
   populateMelodyModal() {
     this.melodyListContainer.innerHTML = '';
 
-    MELODIES.forEach((melody, idx) => {
+    const melodies = this.trainer.melodies;
+
+    melodies.forEach((melody, idx) => {
       const card = document.createElement('div');
-      card.className = `melody-card flex items-center justify-between gap-4 ${melody.id === this.trainer.currentMelody.id ? 'selected' : ''}`;
+      const isSelected = this.trainer.currentMelody && melody.id === this.trainer.currentMelody.id;
+      card.className = `melody-card flex items-center justify-between gap-4 ${isSelected ? 'selected' : ''}`;
 
       const diffBadgeColor = melody.difficulty === 'Easy'
         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
@@ -658,26 +680,51 @@ class App {
         ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
         : 'bg-rose-500/20 text-rose-300 border-rose-500/30';
 
+      const customBadge = melody.isCustom
+        ? `<span class="text-[9px] font-black px-1.5 py-0.5 rounded border uppercase bg-sky-500/20 text-sky-300 border-sky-500/40">CUSTOM</span>`
+        : '';
+
+      const deleteButton = melody.isCustom
+        ? `<button class="btn-delete-custom text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors ml-1" title="Remove custom melody">🗑️</button>`
+        : '';
+
       card.innerHTML = `
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-sky-400 text-sm">
-            ${idx + 1}
+            ${melody.isCustom ? '🎵' : idx + 1}
           </div>
           <div>
             <div class="flex items-center gap-2">
               <h4 class="font-bold text-white text-sm">${melody.title}</h4>
+              ${customBadge}
               <span class="text-[9px] font-extrabold px-2 py-0.5 rounded border uppercase ${diffBadgeColor}">${melody.difficulty}</span>
             </div>
             <p class="text-xs text-slate-400">${melody.composer} • ${melody.description}</p>
           </div>
         </div>
-        <div class="text-right">
-          <span class="text-[11px] font-mono text-slate-400 block">${melody.notes.length} notes • ${melody.key}</span>
-          <button class="mt-1 px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors">
-            Play Snippet
-          </button>
+        <div class="flex items-center gap-2 text-right">
+          <div>
+            <span class="text-[11px] font-mono text-slate-400 block">${melody.notes.length} notes • ${melody.key}</span>
+            <button class="mt-1 px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors">
+              Play
+            </button>
+          </div>
+          ${deleteButton}
         </div>
       `;
+
+      // Handle custom melody deletion
+      const delBtn = card.querySelector('.btn-delete-custom');
+      if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (confirm(`Remove custom melody "${melody.title}"?`)) {
+            this.trainer.removeCustomMelody(melody.id);
+            this.populateMelodyModal();
+            this.showToast(`Removed "${melody.title}"`, 'info');
+          }
+        });
+      }
 
       card.addEventListener('click', () => {
         this.trainer.loadMelody(melody.id);
@@ -696,6 +743,291 @@ class App {
 
   closeMelodyModal() {
     this.modalMelodySelect.classList.remove('open');
+  }
+
+  /**
+   * Set up .MID file loading and Drag & Drop handlers
+   */
+  setupMidiFileLoader() {
+    // 1. HUD Load button
+    this.btnLoadMidi?.addEventListener('click', () => {
+      this.midiFileInput?.click();
+    });
+
+    // 2. Modal dropzone click
+    this.midiModalDropzone?.addEventListener('click', () => {
+      this.midiFileInput?.click();
+    });
+
+    // 3. File Input change
+    this.midiFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        this.loadMidiFromFile(file);
+      }
+      this.midiFileInput.value = '';
+    });
+
+    // 4. Modal Dropzone drag events
+    if (this.midiModalDropzone) {
+      ['dragenter', 'dragover'].forEach(eventName => {
+        this.midiModalDropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.midiModalDropzone.classList.add('border-sky-400', 'bg-sky-500/20');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        this.midiModalDropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.midiModalDropzone.classList.remove('border-sky-400', 'bg-sky-500/20');
+        });
+      });
+
+      this.midiModalDropzone.addEventListener('drop', (e) => {
+        const file = e.dataTransfer?.files?.[0];
+        if (file) {
+          this.loadMidiFromFile(file);
+        }
+      });
+    }
+
+    // 5. Global Window Drag & Drop
+    let dragCounter = 0;
+    window.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      if (this.dropOverlay) {
+        this.dropOverlay.classList.remove('pointer-events-none', 'opacity-0');
+        this.dropOverlay.classList.add('opacity-100', 'pointer-events-auto');
+      }
+    });
+
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+
+    window.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0 && this.dropOverlay) {
+        dragCounter = 0;
+        this.dropOverlay.classList.remove('opacity-100', 'pointer-events-auto');
+        this.dropOverlay.classList.add('pointer-events-none', 'opacity-0');
+      }
+    });
+
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      if (this.dropOverlay) {
+        this.dropOverlay.classList.remove('opacity-100', 'pointer-events-auto');
+        this.dropOverlay.classList.add('pointer-events-none', 'opacity-0');
+      }
+      const file = e.dataTransfer?.files?.[0];
+      if (file) {
+        this.loadMidiFromFile(file);
+      }
+    });
+    // 6. Channel Selection Modal controls
+    this.btnCloseChannelModal?.addEventListener('click', () => this.closeChannelModal());
+    this.btnCancelChannel?.addEventListener('click', () => this.closeChannelModal());
+    this.modalChannelSelect?.addEventListener('click', (e) => {
+      if (e.target === this.modalChannelSelect) this.closeChannelModal();
+    });
+  }
+
+  /**
+   * Parse external MIDI file and load into practice trainer.
+   * If multiple channels are detected, prompts user with channel selection modal.
+   */
+  async loadMidiFromFile(file) {
+    if (!file) return;
+    const nameLower = file.name.toLowerCase();
+    if (!nameLower.endsWith('.mid') && !nameLower.endsWith('.midi')) {
+      this.showToast('Please select a valid Standard MIDI File (.mid or .midi)', 'error');
+      return;
+    }
+
+    try {
+      this.showToast(`Analyzing ${file.name}...`, 'info');
+      const arrayBuffer = await file.arrayBuffer();
+      const channelInfo = inspectMidiChannels(arrayBuffer, file.name);
+
+      if (!channelInfo.channels || channelInfo.channels.length === 0) {
+        throw new Error('No playable note events found in this MIDI file.');
+      }
+
+      if (channelInfo.channels.length === 1) {
+        // Single channel present: load directly without interrupting user
+        const targetCh = channelInfo.channels[0].channelNumber;
+        const melody = parseMidiFile(arrayBuffer, file.name, targetCh);
+        this.finishLoadingCustomMelody(melody);
+      } else {
+        // Multiple channels found: show channel selector modal
+        this.showChannelSelectModal(channelInfo, arrayBuffer, file.name);
+      }
+    } catch (err) {
+      console.error('Failed to parse MIDI file:', err);
+      this.showToast(`⚠️ Could not load MIDI: ${err.message}`, 'error');
+    }
+  }
+
+  /**
+   * Display interactive modal asking user which MIDI channel to load
+   */
+  showChannelSelectModal(channelInfo, arrayBuffer, fileName) {
+    this.pendingMidiBuffer = arrayBuffer;
+    this.pendingMidiFileName = fileName;
+
+    if (this.channelModalFilename) {
+      this.channelModalFilename.innerText = fileName;
+      this.channelModalFilename.title = fileName;
+    }
+
+    if (this.channelModalMeta) {
+      const timeSigStr = channelInfo.timeSignature ? `${channelInfo.timeSignature[0]}/${channelInfo.timeSignature[1]}` : '4/4';
+      this.channelModalMeta.innerHTML = `
+        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">${channelInfo.tempoBpm} BPM</span>
+        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">${timeSigStr}</span>
+        <span class="px-2 py-0.5 rounded bg-slate-800 text-sky-400 font-mono font-medium">${channelInfo.detectedKey}</span>
+      `;
+    }
+
+    if (this.channelListContainer) {
+      this.channelListContainer.innerHTML = '';
+
+      // 1. "All Channels (Merged)" Option
+      const totalNotes = channelInfo.channels.reduce((sum, ch) => sum + ch.noteCount, 0);
+      const allCard = document.createElement('div');
+      allCard.className = 'channel-card flex items-center justify-between gap-3';
+      allCard.innerHTML = `
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center font-black text-emerald-400 text-base shrink-0">
+            🎼
+          </div>
+          <div class="truncate">
+            <div class="flex items-center gap-2">
+              <h4 class="font-bold text-white text-sm">All Channels (Merged)</h4>
+              <span class="text-[9px] font-black px-1.5 py-0.5 rounded border uppercase bg-emerald-500/20 text-emerald-300 border-emerald-500/40">FULL SONG</span>
+            </div>
+            <p class="text-xs text-slate-400 truncate">Extracts lead melody across all ${channelInfo.channels.length} channels</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <div class="text-right">
+            <span class="text-xs font-mono font-bold text-emerald-400 block">${totalNotes} notes</span>
+            <span class="text-[10px] text-slate-400 font-medium">All tracks</span>
+          </div>
+          <button class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors">
+            Select
+          </button>
+        </div>
+      `;
+      allCard.addEventListener('click', () => {
+        this.loadPendingChannel(null);
+      });
+      this.channelListContainer.appendChild(allCard);
+
+      // 2. Individual Channel Cards
+      channelInfo.channels.forEach(ch => {
+        const card = document.createElement('div');
+        card.className = 'channel-card flex items-center justify-between gap-3';
+        const displayName = ch.trackName || ch.instrumentName;
+        const subtext = ch.trackName ? `${ch.instrumentName} • Range: ${ch.pitchRange}` : `Range: ${ch.pitchRange}`;
+
+        card.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex flex-col items-center justify-center font-bold text-sky-400 shrink-0">
+              <span class="text-[9px] text-slate-400 font-semibold leading-none">CH</span>
+              <span class="text-sm font-black leading-tight">${ch.channelNumber}</span>
+            </div>
+            <div class="truncate">
+              <div class="flex items-center gap-2">
+                <h4 class="font-bold text-white text-sm truncate">${displayName}</h4>
+                ${ch.isDrum ? '<span title="Percussion Channel">🥁</span>' : ''}
+              </div>
+              <p class="text-xs text-slate-400 truncate">${subtext}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <div class="text-right">
+              <span class="text-xs font-mono font-bold text-sky-400 block">${ch.noteCount} notes</span>
+              <span class="text-[10px] text-slate-400 font-medium">Single Part</span>
+            </div>
+            <button class="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors">
+              Select
+            </button>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          this.loadPendingChannel(ch.channelNumber);
+        });
+        this.channelListContainer.appendChild(card);
+      });
+    }
+
+    this.modalChannelSelect?.classList.add('open');
+  }
+
+  closeChannelModal() {
+    this.modalChannelSelect?.classList.remove('open');
+    this.pendingMidiBuffer = null;
+    this.pendingMidiFileName = '';
+  }
+
+  loadPendingChannel(targetChannel) {
+    if (!this.pendingMidiBuffer) return;
+    try {
+      const melody = parseMidiFile(this.pendingMidiBuffer, this.pendingMidiFileName, targetChannel);
+      this.closeChannelModal();
+      this.finishLoadingCustomMelody(melody);
+    } catch (err) {
+      console.error('Failed to parse selected channel:', err);
+      this.showToast(`⚠️ Could not load channel: ${err.message}`, 'error');
+    }
+  }
+
+  finishLoadingCustomMelody(melody) {
+    if (!melody || !melody.notes || melody.notes.length === 0) {
+      throw new Error('No notes found in selected channel.');
+    }
+
+    this.trainer.addCustomMelody(melody);
+    this.closeMelodyModal();
+    this.setAppMode('practice');
+    this.populateMelodyModal();
+
+    const timeSigStr = melody.timeSignature ? `${melody.timeSignature[0]}/${melody.timeSignature[1]}` : '4/4';
+    this.showToast(`✨ Loaded "${melody.title}" (${melody.notes.length} notes • ${melody.bpm} BPM • ${timeSigStr})`, 'success');
+  }
+
+  /**
+   * Sleek Toast Notification
+   */
+  showToast(message, type = 'info') {
+    if (!this.toastContainer) return;
+
+    const toast = document.createElement('div');
+    toast.className = `midisheet-toast ${type}`;
+
+    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+    toast.innerHTML = `
+      <span class="text-base leading-none">${icon}</span>
+      <span class="flex-1 text-xs text-white leading-tight font-medium">${message}</span>
+    `;
+
+    this.toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('fade-out');
+      setTimeout(() => {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+      }, 350);
+    }, 4000);
   }
 
   /**
@@ -745,6 +1077,59 @@ class App {
       feedbackMsgEl.innerText = '👍 Solid playing! Try locking right onto each metronome click to earn 3 stars.';
     } else {
       feedbackMsgEl.innerText = '💪 Good effort! Follow the metronome pulse and highlighted keys to build rhythm speed.';
+    }
+
+    // Render Mistakes Review List if there were mistakes
+    const mistakesSection = document.getElementById('score-mistakes-section');
+    const mistakesCountBadge = document.getElementById('score-mistakes-count-badge');
+    const mistakesList = document.getElementById('score-mistakes-list');
+
+    if (mistakesSection && mistakesList) {
+      mistakesList.innerHTML = '';
+      if (summary.mistakeCount > 0 && Array.isArray(summary.noteResults)) {
+        mistakesSection.classList.remove('hidden');
+        if (mistakesCountBadge) {
+          mistakesCountBadge.innerText = `${summary.mistakeCount} ${summary.mistakeCount === 1 ? 'Mistake' : 'Mistakes'}`;
+        }
+
+        summary.noteResults.forEach((res, idx) => {
+          if (res && res.mistakes > 0 && summary.melody.notes[idx]) {
+            const targetNote = summary.melody.notes[idx];
+            const targetInfo = MusicTheory.getNoteInfo(targetNote.midi);
+            const wrongInfo = res.lastWrongMidi ? MusicTheory.getNoteInfo(res.lastWrongMidi) : null;
+            const wrongName = wrongInfo ? wrongInfo.fullName : 'Wrong pitch';
+
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between p-2 rounded-lg bg-slate-900/80 border border-rose-900/30 text-xs';
+            item.innerHTML = `
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 font-bold flex items-center justify-center text-[10px]">#${idx + 1}</span>
+                <div>
+                  <div class="font-semibold text-slate-200">Expected <span class="text-emerald-400 font-mono font-bold">${targetInfo.fullName}</span> • Played <span class="text-rose-400 font-mono font-bold">${wrongName}</span></div>
+                  <div class="text-[10px] text-slate-400">${targetNote.duration >= 4 ? 'Whole note' : targetNote.duration >= 2 ? 'Half note' : targetNote.duration >= 1 ? 'Quarter note' : 'Eighth note'} (${res.mistakes}x wrong attempt${res.mistakes > 1 ? 's' : ''})</div>
+                </div>
+              </div>
+              <button class="btn-inspect-mistake px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-semibold transition-colors" data-note-idx="${idx}">
+                View 🔍
+              </button>
+            `;
+
+            const btnInspect = item.querySelector('.btn-inspect-mistake');
+            if (btnInspect) {
+              btnInspect.addEventListener('click', () => {
+                this.closeScorecard();
+                this.trainer.noteIndex = idx;
+                this.notation.drawMelody(summary.melody, idx, summary.melody.notes[idx], this.activeNotes, summary.noteResults, this.trainer.isFinished);
+                this.notation.triggerMistakeFlash();
+              });
+            }
+
+            mistakesList.appendChild(item);
+          }
+        });
+      } else {
+        mistakesSection.classList.add('hidden');
+      }
     }
 
     this.modalScorecard.classList.add('open');
@@ -1019,9 +1404,10 @@ class App {
     document.getElementById('btn-score-next')?.addEventListener('click', () => {
       this.closeScorecard();
       // Pick next melody in list
-      const currentIdx = MELODIES.findIndex(m => m.id === this.trainer.currentMelody.id);
-      const nextIdx = (currentIdx + 1) % MELODIES.length;
-      this.trainer.loadMelody(MELODIES[nextIdx].id);
+      const melodies = this.trainer.melodies;
+      const currentIdx = melodies.findIndex(m => m.id === this.trainer.currentMelody.id);
+      const nextIdx = (currentIdx + 1) % melodies.length;
+      this.trainer.loadMelody(melodies[nextIdx].id);
     });
 
     // Wind Instrument Mode Toggle

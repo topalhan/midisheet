@@ -22,6 +22,18 @@ public:
     void noteOn(int midi);
     void noteOff(int midi);
     void setTargetNote(int midi) { targetMidiNote = midi; repaint(); }
+    void setReviewNotes(int targetMidi, int wrongMidi)
+    {
+        reviewTargetMidi = targetMidi;
+        reviewWrongMidi = wrongMidi;
+        repaint();
+    }
+    void clearReviewNotes()
+    {
+        reviewTargetMidi = -1;
+        reviewWrongMidi = -1;
+        repaint();
+    }
 
     std::function<void(int midi, int velocity)> onNoteTriggered;
     std::function<void(int midi)> onNoteReleased;
@@ -40,6 +52,8 @@ private:
     const int firstMidi;
     const int lastMidi;
     int targetMidiNote = -1;
+    int reviewTargetMidi = -1;
+    int reviewWrongMidi = -1;
     int currentlyClickedMidi = -1;
 
     std::set<int> activeMidiNotes;

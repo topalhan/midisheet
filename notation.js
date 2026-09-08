@@ -813,21 +813,64 @@ export class NotationRenderer {
     const timeSigX = staffX + 54;
     this.drawTimeSignature(ctx, timeSigX, trebleBottomY, bassBottomY, lineSpacing, melody.timeSignature);
 
-    // 2. Calculate Layout Metrics
-    const notesStartX = staffX + 90;
-    const availableWidth = staffWidth - 110;
+    // 2. Precompute Generous Non-Linear Duration Spacing & Measure Barlines
+    const notesStartX = staffX + 100;
+    const availableWidth = staffWidth - 120;
     const totalNotes = melody.notes.length;
+    const beatsPerMeasure = melody.timeSignature[0] || 4;
 
-    const baseNoteSpacing = Math.max(46, Math.min(76, availableWidth / (totalNotes + 0.5)));
-    const totalMelodyWidth = (totalNotes + 1) * baseNoteSpacing;
+    const noteXPositions = [];
+    const barlineXPositions = [];
+    let curX = notesStartX + 24;
+    let currentMeasureBeats = 0;
 
-    // Smooth scroll if melody is wider than available viewport
+    melody.notes.forEach((note, i) => {
+      const info = MusicTheory.getNoteInfo(note.midi, preferFlats);
+
+      if (i > 0) {
+        const prevNote = melody.notes[i - 1];
+        // Non-linear duration spacing: minimum 72px, scaled up with duration
+        let spacing = Math.max(72, 90 * Math.pow(Math.max(0.25, prevNote.duration), 0.55));
+
+        // Extra clearance for accidentals
+        if (info.accidental) spacing += 18;
+
+        // Measure boundary check
+        if (currentMeasureBeats + prevNote.duration >= beatsPerMeasure - 0.01) {
+          const barX = curX + spacing * 0.5;
+          barlineXPositions.push(barX);
+          spacing += 32;
+          currentMeasureBeats = (currentMeasureBeats + prevNote.duration) % beatsPerMeasure;
+        } else {
+          currentMeasureBeats += prevNote.duration;
+        }
+
+        curX += spacing;
+      } else {
+        if (info.accidental) curX += 16;
+      }
+
+      noteXPositions.push(curX);
+    });
+
+    if (noteXPositions.length > 0) {
+      const lastNote = melody.notes[melody.notes.length - 1];
+      const lastSpacing = Math.max(72, 90 * Math.pow(Math.max(0.25, lastNote.duration), 0.55));
+      barlineXPositions.push(noteXPositions[noteXPositions.length - 1] + lastSpacing * 0.75);
+    }
+
+    // Dynamic smooth focal scrolling (anchors target note at ~30% from left)
+    const totalMelodyWidth = noteXPositions.length > 0 ? (noteXPositions[noteXPositions.length - 1] - notesStartX + 140) : availableWidth;
     let scrollX = 0;
     if (totalMelodyWidth > availableWidth) {
-      const activeX = notesStartX + currentIdx * baseNoteSpacing;
-      const targetFocusX = notesStartX + availableWidth * 0.4;
+      const activeX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
+      const targetFocusX = notesStartX + availableWidth * 0.30;
       scrollX = Math.max(0, activeX - targetFocusX);
+      const maxScroll = totalMelodyWidth - availableWidth + 40;
+      scrollX = Math.min(scrollX, maxScroll);
     }
+
+    const labelBaselineY = bassBottomY + lineSpacing * 1.05;
 
     // Clip rendering area to prevent drawing over clefs or outside staff
     ctx.save();
@@ -835,39 +878,69 @@ export class NotationRenderer {
     ctx.rect(staffX + 80, 0, availableWidth + 30, this.height);
     ctx.clip();
 
-    // 3. Draw Measure Barlines
-    let currentBeats = 0;
-    const beatsPerMeasure = melody.timeSignature[0];
+    // 3. Draw Measure Barlines with Measure Numbers
+    barlineXPositions.forEach((barXRaw, m) => {
+      const barX = barXRaw - scrollX;
+      if (barX < staffX + 60 || barX > staffX + staffWidth + 60) return;
 
-    melody.notes.forEach((note, i) => {
-      currentBeats += note.duration;
-      if (currentBeats >= beatsPerMeasure && i < totalNotes - 1) {
-        currentBeats = currentBeats % beatsPerMeasure;
-        const barX = notesStartX + (i + 0.55) * baseNoteSpacing - scrollX;
+      const isLast = (m === barlineXPositions.length - 1);
+      ctx.save();
+      if (isLast) {
+        // Double barline
+        ctx.strokeStyle = isDark ? 'rgba(203, 213, 225, 0.7)' : 'rgba(15, 23, 42, 0.7)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(barX - 5, trebleBottomY - lineSpacing * 4);
+        ctx.lineTo(barX - 5, trebleBottomY);
+        ctx.moveTo(barX - 5, bassBottomY - lineSpacing * 4);
+        ctx.lineTo(barX - 5, bassBottomY);
+        ctx.stroke();
 
-        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.28)' : 'rgba(15, 23, 42, 0.35)';
-        ctx.lineWidth = 1.2;
-
-        // Draw barline across treble
+        ctx.lineWidth = 3.5;
         ctx.beginPath();
         ctx.moveTo(barX, trebleBottomY - lineSpacing * 4);
         ctx.lineTo(barX, trebleBottomY);
-        ctx.stroke();
-
-        // Draw barline across bass
-        ctx.beginPath();
         ctx.moveTo(barX, bassBottomY - lineSpacing * 4);
         ctx.lineTo(barX, bassBottomY);
         ctx.stroke();
+      } else {
+        // Standard barline
+        ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(15, 23, 42, 0.35)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(barX, trebleBottomY - lineSpacing * 4);
+        ctx.lineTo(barX, trebleBottomY);
+        ctx.moveTo(barX, bassBottomY - lineSpacing * 4);
+        ctx.lineTo(barX, bassBottomY);
+        ctx.stroke();
+
+        // Measure Number Pill
+        ctx.font = '700 9px "Inter", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = isDark ? '#1e293b' : '#e2e8f0';
+        const numW = 18;
+        const numH = 13;
+        const pillY = trebleBottomY - lineSpacing * 4 - 15;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(barX - numW / 2, pillY, numW, numH, 3);
+          ctx.fill();
+        } else {
+          ctx.fillRect(barX - numW / 2, pillY, numW, numH);
+        }
+        ctx.fillStyle = isDark ? '#94a3b8' : '#64748b';
+        ctx.fillText(String(m + 2), barX, pillY + numH / 2);
       }
+      ctx.restore();
     });
 
     // 4. Render Melody Notes
     melody.notes.forEach((note, i) => {
-      const noteX = notesStartX + i * baseNoteSpacing - scrollX;
+      const noteX = noteXPositions[i] - scrollX;
 
       // Skip notes off-screen
-      if (noteX < staffX + 50 || noteX > staffX + staffWidth + 50) return;
+      if (noteX < staffX + 50 || noteX > staffX + staffWidth + 60) return;
 
       const info = MusicTheory.getNoteInfo(note.midi, preferFlats);
       const clef = note.midi >= this.options.splitPoint ? 'treble' : 'bass';
@@ -884,8 +957,8 @@ export class NotationRenderer {
 
       // Determine colors & styling
       let noteColor;
-      let isHollow = note.duration >= 2; // Half/Whole notes are hollow
-      let isWhole = note.duration >= 4;
+      const isHollow = note.duration >= 2;
+      const isWhole = note.duration >= 4;
 
       if (isPast) {
         if (result && result.mistakes === 0) {
@@ -896,10 +969,10 @@ export class NotationRenderer {
       } else if (isTarget) {
         noteColor = '#38bdf8'; // Electric Sky
       } else {
-        noteColor = isDark ? '#94a3b8' : '#475569'; // Upcoming neutral ink
+        noteColor = isDark ? '#e2e8f0' : '#1e293b'; // Crisp readable white/dark
       }
 
-      // Target note glow & cursor
+      // Target note pulse halo & caret
       if (isTarget) {
         const isFlashingRed = this.flashMistakeTimestamp && (timestamp - this.flashMistakeTimestamp < 420);
         const glowColor = isFlashingRed ? '#ef4444' : '#38bdf8';
@@ -909,25 +982,19 @@ export class NotationRenderer {
         ctx.beginPath();
         ctx.arc(noteX, noteY, (lineSpacing * 0.95) + pulse * 5, 0, Math.PI * 2);
         ctx.fillStyle = glowColor;
-        ctx.globalAlpha = 0.25 + pulse * 0.2;
+        ctx.globalAlpha = 0.22 + pulse * 0.18;
         ctx.fill();
         ctx.globalAlpha = 1.0;
 
         // Target Caret Cursor (pointing down to note)
-        const caretY = (clef === 'treble' ? trebleBottomY - lineSpacing * 5.2 : bassBottomY - lineSpacing * 5.2);
+        const caretY = (clef === 'treble' ? trebleBottomY - lineSpacing * 5.3 : bassBottomY - lineSpacing * 5.3);
         ctx.fillStyle = glowColor;
         ctx.beginPath();
         ctx.moveTo(noteX, caretY + 8);
-        ctx.lineTo(noteX - 6, caretY);
-        ctx.lineTo(noteX + 6, caretY);
+        ctx.lineTo(noteX - 5.5, caretY);
+        ctx.lineTo(noteX + 5.5, caretY);
         ctx.closePath();
         ctx.fill();
-
-        // Target Pitch Tag
-        ctx.font = '700 11px "Inter", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(info.fullName, noteX, caretY - 2);
       }
 
       // Draw Note Stem (unless whole note)
@@ -985,16 +1052,50 @@ export class NotationRenderer {
         this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: isTarget, clef }, lineSpacing, 1.0);
       }
 
-      // Pitch Name Label below/above
+      // UNIFIED Pitch Name Label Lane (Clean horizontal baseline below the staff)
       if (this.options.showNoteNames) {
         ctx.save();
-        ctx.font = `600 ${Math.round(lineSpacing * 0.65)}px "Inter", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = isTarget ? '#38bdf8' : (isPast ? noteColor : (isDark ? '#64748b' : '#94a3b8'));
+        const pillW = 34;
+        const pillH = 18;
+        const pillX = noteX - pillW / 2;
+        const pillY = labelBaselineY;
 
-        const labelY = staffPos >= 4 ? noteY + lineSpacing * 1.5 : noteY - lineSpacing * 1.5;
-        ctx.fillText(info.fullName, noteX, labelY);
+        if (isTarget) {
+          ctx.fillStyle = '#38bdf8';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+            ctx.fill();
+          } else {
+            ctx.fillRect(pillX, pillY, pillW, pillH);
+          }
+
+          ctx.font = '700 11px "Inter", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#0f172a';
+          ctx.fillText(info.fullName, noteX, pillY + pillH / 2);
+        } else {
+          ctx.fillStyle = isDark ? '#0f172a' : '#f1f5f9';
+          ctx.strokeStyle = isPast ? (result && result.mistakes > 0 ? 'rgba(239, 68, 68, 0.5)' : 'rgba(34, 197, 94, 0.5)') : (isDark ? '#334155' : '#cbd5e1');
+          ctx.lineWidth = 1;
+
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(pillX, pillY, pillW, pillH);
+            ctx.strokeRect(pillX, pillY, pillW, pillH);
+          }
+
+          ctx.font = `600 10px "Inter", sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = isPast ? (result && result.mistakes > 0 ? '#f87171' : '#4ade80') : (isDark ? '#94a3b8' : '#475569');
+          ctx.fillText(info.fullName, noteX, pillY + pillH / 2);
+        }
         ctx.restore();
       }
     });
@@ -1002,14 +1103,16 @@ export class NotationRenderer {
     ctx.restore(); // end clip
 
     // 5. Render Ghost Notes of Currently Held Keys
-    if (this.activeNotes.size > 0) {
+    if (this.activeNotes.size > 0 && noteXPositions.length > 0) {
+      const ghostBaseX = (currentIdx >= 0 && currentIdx < noteXPositions.length) ? noteXPositions[currentIdx] : notesStartX;
+      const ghostX = ghostBaseX - scrollX;
+
       for (const [midi, noteData] of this.activeNotes.entries()) {
         const info = MusicTheory.getNoteInfo(midi, preferFlats);
         const clef = midi >= this.options.splitPoint ? 'treble' : 'bass';
         const staffPos = MusicTheory.getStaffPosition(info.diatonicStep, clef);
         const bottomY = clef === 'treble' ? trebleBottomY : bassBottomY;
         const y = bottomY - staffPos * (lineSpacing / 2);
-        const ghostX = notesStartX + currentIdx * baseNoteSpacing - scrollX;
 
         ctx.save();
         ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';

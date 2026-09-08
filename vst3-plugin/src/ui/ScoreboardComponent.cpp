@@ -47,7 +47,7 @@ void ScoreboardComponent::resized()
     modeSelector.setBounds(rightEdge - 345, topEdge, 132, 28);
 }
 
-void ScoreboardComponent::updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes, bool preferFlats)
+void ScoreboardComponent::updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes, bool preferFlats, int reviewMistakeIndex)
 {
     const auto& melody = scorer.getCurrentMelody();
     melodyTitle = melody.title;
@@ -112,8 +112,51 @@ void ScoreboardComponent::updateState(const MelodyScorer& scorer, const Detected
         }
         else
         {
-            timingFeedbackStr = juce::String(scorecard.mistakeCount) + " mistake(s) to review";
             currentRating = TimingRating::Missed;
+            const auto& evals = scorer.getNoteEvaluations();
+            const auto& notes = melody.notes;
+
+            int targetMistakeIdx = reviewMistakeIndex;
+            if (targetMistakeIdx < 0 || targetMistakeIdx >= static_cast<int>(notes.size()) ||
+                (targetMistakeIdx < static_cast<int>(evals.size()) && evals[static_cast<size_t>(targetMistakeIdx)].mistakeAttempts == 0))
+            {
+                targetMistakeIdx = scorer.getFirstMistakeIndex();
+            }
+
+            if (targetMistakeIdx >= 0 && targetMistakeIdx < static_cast<int>(notes.size()))
+            {
+                const auto& noteObj = notes[static_cast<size_t>(targetMistakeIdx)];
+                targetNoteStr = noteObj.name;
+
+                juce::String wrongStr = "?";
+                if (targetMistakeIdx < static_cast<int>(evals.size()) && evals[static_cast<size_t>(targetMistakeIdx)].lastWrongMidi >= 0)
+                {
+                    wrongStr = MusicTheory::getNoteInfo(evals[static_cast<size_t>(targetMistakeIdx)].lastWrongMidi, preferFlats).fullName;
+                }
+
+                playedNoteStr = wrongStr;
+                hasPlayedNote = true;
+                playedMatchesTarget = false;
+
+                if (scorecard.mistakeCount == 1)
+                {
+                    timingFeedbackStr = "Mistake Note #" + juce::String(targetMistakeIdx + 1) + ": Played " + wrongStr + " (Expected " + noteObj.name + ")";
+                }
+                else
+                {
+                    timingFeedbackStr = "Reviewing Note #" + juce::String(targetMistakeIdx + 1) + ": Played " + wrongStr + " vs " + noteObj.name + " (" + juce::String(scorecard.mistakeCount) + " mistakes)";
+                }
+
+                if (targetMistakeIdx < static_cast<int>(evals.size()) && evals[static_cast<size_t>(targetMistakeIdx)].completed)
+                {
+                    const int ro = static_cast<int>(std::round(evals[static_cast<size_t>(targetMistakeIdx)].offsetMs));
+                    timingFeedbackStr += " [" + (ro >= 0 ? juce::String("+") : juce::String()) + juce::String(ro) + "ms]";
+                }
+            }
+            else
+            {
+                timingFeedbackStr = juce::String(scorecard.mistakeCount) + " mistake(s) to review";
+            }
         }
     }
     else
@@ -231,7 +274,9 @@ void ScoreboardComponent::paint(juce::Graphics& g)
         feedbackText = juce::Colour::fromRGB(251, 113, 133);
     }
 
-    const float pillWidth = 190.0f;
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    const float textW = g.getCurrentFont().getStringWidth(timingFeedbackStr);
+    const float pillWidth = std::clamp(textW + 36.0f, 190.0f, 350.0f);
     const float pillHeight = 22.0f;
     g.setColour(feedbackBg);
     g.fillRoundedRectangle(leftX, y, pillWidth, pillHeight, 6.0f);
@@ -247,15 +292,18 @@ void ScoreboardComponent::paint(juce::Graphics& g)
     g.drawText(timingFeedbackStr, leftX + 22.0f, y, pillWidth - 26.0f, pillHeight, juce::Justification::centredLeft);
 
     // Streak badge
+    const float streakX = leftX + pillWidth + 10.0f;
     g.setColour(juce::Colour::fromRGB(245, 158, 11));
     g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-    g.drawText("Streak: " + juce::String(currentStreak), leftX + 200.0f, y, 90.0f, 22.0f, juce::Justification::centredLeft);
+    g.drawText("Streak: " + juce::String(currentStreak), streakX, y, 78.0f, 22.0f, juce::Justification::centredLeft);
 
     // Accuracy Stats
+    const float pitchX = streakX + 82.0f;
     g.setColour(juce::Colour::fromRGB(148, 163, 184));
     g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
-    g.drawText("Pitch: " + juce::String(accuracyPercent) + "%", leftX + 295.0f, y, 80.0f, 22.0f, juce::Justification::centredLeft);
-    g.drawText("Rhythm: " + juce::String(rhythmPercent) + "%", leftX + 380.0f, y, 90.0f, 22.0f, juce::Justification::centredLeft);
+    g.drawText("Pitch: " + juce::String(accuracyPercent) + "%", pitchX, y, 75.0f, 22.0f, juce::Justification::centredLeft);
+    const float rhythmX = pitchX + 78.0f;
+    g.drawText("Rhythm: " + juce::String(rhythmPercent) + "%", rhythmX, y, 85.0f, 22.0f, juce::Justification::centredLeft);
 
     // Detected Chord Display
     const float chordX = bounds.getRight() - 250.0f;

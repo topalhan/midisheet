@@ -13,6 +13,13 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
     setSize(920, 620);
 
     // 1. Add Grand Staff Component
+    grandStaff.onReviewNoteChanged = [this](int noteIdx, int targetMidi, int wrongMidi) {
+        juce::ignoreUnused(noteIdx);
+        if (wrongMidi >= 0)
+            virtualPiano.setReviewNotes(targetMidi, wrongMidi);
+        else
+            virtualPiano.clearReviewNotes();
+    };
     addAndMakeVisible(grandStaff);
 
     // 2. Add Scoreboard HUD Component
@@ -22,6 +29,7 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
         resized();
     };
     scoreboard.onRestartClicked = [this]() {
+        virtualPiano.clearReviewNotes();
         audioProcessor.getScorer().restart();
         grandStaff.setPracticeMelody(&audioProcessor.getScorer().getCurrentMelody(),
                                      audioProcessor.getScorer().getCurrentNoteIndex(),
@@ -55,6 +63,7 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
 
     // 4. Add Melody Selector Modal Component (initially hidden)
     melodySelector.onMelodySelected = [this](const juce::String& melodyId) {
+        virtualPiano.clearReviewNotes();
         audioProcessor.getScorer().loadMelody(melodyId);
         grandStaff.setPracticeMelody(&audioProcessor.getScorer().getCurrentMelody(),
                                      audioProcessor.getScorer().getCurrentNoteIndex(),
@@ -151,7 +160,7 @@ void MidiSheetAudioProcessorEditor::timerCallback()
                                  scorer.getCurrentNoteIndex(),
                                  scorer.isFinished());
     grandStaff.setNoteEvaluations(&scorer.getNoteEvaluations());
-    scoreboard.updateState(scorer, chord, transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats);
+    scoreboard.updateState(scorer, chord, transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats, grandStaff.getActiveReviewMistakeIndex());
     grandStaff.repaint();
 
     if (hasEvents)
@@ -199,7 +208,7 @@ void MidiSheetAudioProcessorEditor::handleMidiEvent(const MidiEvent& ev)
             virtualPiano.setTargetNote(-1);
 
         // Immediate HUD update for instantaneous timing feedback
-        scoreboard.updateState(scorer, MusicTheory::detectChord(activeMidiNotes, preferFlats), transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats);
+        scoreboard.updateState(scorer, MusicTheory::detectChord(activeMidiNotes, preferFlats), transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats, grandStaff.getActiveReviewMistakeIndex());
     }
     else if (ev.type == MidiEventType::NoteOff)
     {
@@ -214,7 +223,7 @@ void MidiSheetAudioProcessorEditor::handleMidiEvent(const MidiEvent& ev)
 
         auto& scorer = audioProcessor.getScorer();
         const auto transport = audioProcessor.getTransportState();
-        scoreboard.updateState(scorer, MusicTheory::detectChord(activeMidiNotes, preferFlats), transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats);
+        scoreboard.updateState(scorer, MusicTheory::detectChord(activeMidiNotes, preferFlats), transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats, grandStaff.getActiveReviewMistakeIndex());
     }
 }
 

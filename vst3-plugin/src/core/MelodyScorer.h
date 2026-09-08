@@ -31,6 +31,8 @@ struct TimingFeedback
 struct NoteEvaluation
 {
     int mistakeAttempts = 0;
+    std::vector<int> wrongNotesPlayed;
+    int lastWrongMidi = -1;
     TimingRating timing = TimingRating::None;
     double offsetMs = 0.0;
     bool completed = false;
@@ -85,6 +87,27 @@ public:
     int getPitchAccuracy() const { return scorecard.pitchAccuracy; }
     int getRhythmAccuracy() const { return scorecard.rhythmAccuracy; }
     const std::vector<NoteEvaluation>& getNoteEvaluations() const { return noteEvaluations; }
+
+    std::vector<int> getMistakeIndices() const
+    {
+        std::vector<int> indices;
+        for (size_t i = 0; i < noteEvaluations.size(); ++i)
+        {
+            if (noteEvaluations[i].mistakeAttempts > 0)
+                indices.push_back(static_cast<int>(i));
+        }
+        return indices;
+    }
+
+    int getFirstMistakeIndex() const
+    {
+        for (size_t i = 0; i < noteEvaluations.size(); ++i)
+        {
+            if (noteEvaluations[i].mistakeAttempts > 0)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
 
 private:
     void calculateLiveScorecard();

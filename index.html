@@ -155,6 +155,10 @@
               <button id="btn-open-melody-modal" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 transition-colors flex items-center gap-1">
                 <span>📚 Choose Melody</span>
               </button>
+              <button id="btn-load-midi" title="Load external .MID file to practice and score" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1">
+                <span>📁 Load .MID</span>
+              </button>
+              <input type="file" id="midi-file-input" accept=".mid,.midi" class="hidden">
             </div>
           </div>
         </div>
@@ -408,11 +412,76 @@
         </div>
         <button id="btn-close-melody-modal" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-sm">✕</button>
       </div>
+      <!-- Drag & Drop Upload Zone in Modal -->
+      <div class="p-4 pb-0">
+        <div id="midi-modal-dropzone" class="border-2 border-dashed border-sky-500/40 hover:border-sky-400/80 bg-sky-500/5 hover:bg-sky-500/10 rounded-xl p-3 text-center cursor-pointer transition-all flex items-center justify-between gap-3 group">
+          <div class="flex items-center gap-3 text-left">
+            <div class="w-9 h-9 rounded-xl bg-sky-500/20 group-hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 flex items-center justify-center text-lg transition-transform group-hover:scale-105">
+              📁
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white group-hover:text-sky-300 transition-colors">Load External .MID File</div>
+              <div class="text-[11px] text-slate-400">Click to browse or drop any Standard MIDI File (.mid, .midi)</div>
+            </div>
+          </div>
+          <span class="px-2.5 py-1 rounded-lg bg-sky-600 group-hover:bg-sky-500 text-white font-semibold text-xs shadow-sm transition-colors pointer-events-none">
+            Browse
+          </span>
+        </div>
+      </div>
+
       <div id="melody-list-container" class="p-4 overflow-y-auto max-h-[60vh] space-y-2.5">
         <!-- Populated dynamically by app.js -->
       </div>
     </div>
   </div>
+
+  <!-- MIDI Channel Selection Modal -->
+  <div id="modal-channel-select" class="modal-backdrop">
+    <div class="modal-card max-w-lg">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">🎛️</span>
+          <div>
+            <h3 class="font-bold text-white text-base">Select MIDI Channel</h3>
+            <p id="channel-modal-subtitle" class="text-[11px] text-slate-400">Choose which instrument channel to practice and score</p>
+          </div>
+        </div>
+        <button id="btn-close-channel-modal" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-sm">✕</button>
+      </div>
+
+      <!-- File info badge banner -->
+      <div class="px-4 py-2 bg-slate-950/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span id="channel-modal-filename" class="font-semibold text-sky-400 font-mono text-[11px] truncate max-w-[260px]">filename.mid</span>
+        <div id="channel-modal-meta" class="flex items-center gap-2 text-slate-400 text-[11px]">
+          <!-- Tempo & Key tags -->
+        </div>
+      </div>
+
+      <!-- Channel Cards List -->
+      <div id="channel-list-container" class="p-4 overflow-y-auto max-h-[55vh] space-y-2">
+        <!-- Populated dynamically by app.js -->
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 border-t border-slate-800 flex items-center justify-between bg-slate-900/60">
+        <span class="text-[11px] text-slate-400">💡 Select an individual instrument part or all merged channels</span>
+        <button id="btn-cancel-channel" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Drag & Drop Overlay -->
+  <div id="drop-overlay" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm border-4 border-dashed border-sky-400 flex flex-col items-center justify-center gap-3 pointer-events-none opacity-0 transition-opacity duration-200">
+    <div class="text-6xl animate-bounce">🎼</div>
+    <h3 class="text-2xl font-black text-white">Drop .MID file to transcribe & score</h3>
+    <p class="text-sm text-sky-300 font-medium">Auto-extracts lead melody, BPM, and time signature for Grand Staff practice</p>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- Performance Scorecard Modal -->
   <div id="modal-scorecard" class="modal-backdrop">
@@ -451,6 +520,17 @@
         <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30" id="score-badge-missed">🔴 0 Missed</span>
       </div>
 
+      <!-- Mistakes Review Breakdown Section (shown when mistakes > 0) -->
+      <div id="score-mistakes-section" class="w-full bg-rose-950/25 border border-rose-900/40 rounded-xl p-3 text-left hidden">
+        <div class="flex items-center justify-between text-[11px] font-bold text-rose-400 mb-1.5">
+          <span>⚠️ Notes to Review</span>
+          <span id="score-mistakes-count-badge" class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px]">1 Mistake</span>
+        </div>
+        <div id="score-mistakes-list" class="space-y-1.5 max-h-28 overflow-y-auto pr-1 text-xs">
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </div>
+
       <div id="score-feedback-message" class="text-xs text-slate-300 italic px-2">
         Outstanding performance! Flawless reading and pitch accuracy.
       </div>
@@ -471,6 +551,6 @@
     MidiSheet • Real-time Web MIDI Music Notation, Trainer & Synthesizer
   </footer>
 
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=clean_notes_2"></script>
 </body>
 </html>

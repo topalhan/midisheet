@@ -1,4 +1,5 @@
 #include "MelodyScorer.h"
+#include "MusicTheory.h"
 #include <cmath>
 #include <algorithm>
 
@@ -211,16 +212,20 @@ bool MelodyScorer::evaluateNote(int midiNote, int velocity, double noteTimestamp
     else
     {
         // Incorrect pitch struck
+        const auto playedInfo = MusicTheory::getNoteInfo(midiNote);
         if (currentNoteIndex >= 0 && currentNoteIndex < static_cast<int>(noteEvaluations.size()))
         {
-            noteEvaluations[static_cast<size_t>(currentNoteIndex)].mistakeAttempts++;
+            auto& ev = noteEvaluations[static_cast<size_t>(currentNoteIndex)];
+            ev.mistakeAttempts++;
+            ev.lastWrongMidi = midiNote;
+            ev.wrongNotesPlayed.push_back(midiNote);
         }
 
         mistakeCount++;
         currentStreak = 0;
         lastFeedback.rating = TimingRating::Missed;
         lastFeedback.offsetMs = 0.0;
-        lastFeedback.text = "Try again (Expected " + target->name + ")";
+        lastFeedback.text = "Played " + playedInfo.fullName + " (Expected " + target->name + ")";
         calculateLiveScorecard();
         return false;
     }

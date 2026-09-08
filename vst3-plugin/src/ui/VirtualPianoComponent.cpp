@@ -142,11 +142,21 @@ void VirtualPianoComponent::paint(juce::Graphics& g)
     for (const auto& k : whiteKeys)
     {
         const bool isActive = (activeMidiNotes.find(k.midi) != activeMidiNotes.end());
+        const bool isReviewTarget = (k.midi == reviewTargetMidi);
+        const bool isReviewWrong = (k.midi == reviewWrongMidi);
         const bool isTarget = (k.midi == targetMidiNote);
 
         if (isActive)
         {
             g.setColour(juce::Colour::fromRGB(56, 189, 248)); // Sky 400 press glow
+        }
+        else if (isReviewWrong)
+        {
+            g.setColour(juce::Colour::fromRGB(254, 205, 211)); // Rose 200 mistaken key
+        }
+        else if (isReviewTarget)
+        {
+            g.setColour(juce::Colour::fromRGB(187, 247, 208)); // Emerald 200 target key
         }
         else if (isTarget)
         {
@@ -160,11 +170,29 @@ void VirtualPianoComponent::paint(juce::Graphics& g)
         g.fillRect(k.rect.reduced(0.5f));
 
         // Border
-        g.setColour(juce::Colour::fromRGB(148, 163, 184));
-        g.drawRect(k.rect.reduced(0.5f), 1.0f);
+        if (isReviewWrong)
+            g.setColour(juce::Colour::fromRGB(244, 63, 94));
+        else if (isReviewTarget)
+            g.setColour(juce::Colour::fromRGB(34, 197, 94));
+        else
+            g.setColour(juce::Colour::fromRGB(148, 163, 184));
 
-        // Key label at bottom of C keys
-        if (k.midi % 12 == 0)
+        g.drawRect(k.rect.reduced(0.5f), (isReviewWrong || isReviewTarget) ? 2.0f : 1.0f);
+
+        // Key label
+        if (isReviewWrong)
+        {
+            g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(159, 18, 57));
+            g.drawText("Played", k.rect.getX(), k.rect.getBottom() - 18.0f, k.rect.getWidth(), 16.0f, juce::Justification::centred);
+        }
+        else if (isReviewTarget)
+        {
+            g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(22, 101, 52));
+            g.drawText("Target", k.rect.getX(), k.rect.getBottom() - 18.0f, k.rect.getWidth(), 16.0f, juce::Justification::centred);
+        }
+        else if (k.midi % 12 == 0)
         {
             g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
             g.setColour(isActive ? juce::Colours::white : juce::Colour::fromRGB(100, 116, 139));
@@ -177,11 +205,21 @@ void VirtualPianoComponent::paint(juce::Graphics& g)
     for (const auto& k : blackKeys)
     {
         const bool isActive = (activeMidiNotes.find(k.midi) != activeMidiNotes.end());
+        const bool isReviewTarget = (k.midi == reviewTargetMidi);
+        const bool isReviewWrong = (k.midi == reviewWrongMidi);
         const bool isTarget = (k.midi == targetMidiNote);
 
         if (isActive)
         {
             g.setColour(juce::Colour::fromRGB(14, 165, 233)); // Sky 500 active
+        }
+        else if (isReviewWrong)
+        {
+            g.setColour(juce::Colour::fromRGB(244, 63, 94)); // Rose 500 mistaken key
+        }
+        else if (isReviewTarget)
+        {
+            g.setColour(juce::Colour::fromRGB(16, 185, 129)); // Emerald 500 target key
         }
         else if (isTarget)
         {
@@ -195,8 +233,28 @@ void VirtualPianoComponent::paint(juce::Graphics& g)
         g.fillRect(k.rect);
 
         // Black key bevel & border
-        g.setColour(juce::Colour::fromRGB(51, 65, 85));
-        g.drawRect(k.rect, 1.0f);
+        if (isReviewWrong)
+            g.setColour(juce::Colour::fromRGB(251, 113, 133));
+        else if (isReviewTarget)
+            g.setColour(juce::Colour::fromRGB(52, 211, 153));
+        else
+            g.setColour(juce::Colour::fromRGB(51, 65, 85));
+
+        g.drawRect(k.rect, (isReviewWrong || isReviewTarget) ? 2.0f : 1.0f);
+
+        // Black key review text
+        if (isReviewWrong)
+        {
+            g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
+            g.setColour(juce::Colours::white);
+            g.drawText("Played", k.rect.getX(), k.rect.getBottom() - 14.0f, k.rect.getWidth(), 12.0f, juce::Justification::centred);
+        }
+        else if (isReviewTarget)
+        {
+            g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
+            g.setColour(juce::Colours::white);
+            g.drawText("Target", k.rect.getX(), k.rect.getBottom() - 14.0f, k.rect.getWidth(), 12.0f, juce::Justification::centred);
+        }
     }
 }
 

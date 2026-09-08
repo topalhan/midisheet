@@ -1,12 +1,43 @@
 #include "MelodyDatabase.h"
+#include "MusicTheory.h"
+#include <algorithm>
+#include <cmath>
 
 namespace MidiSheet
 {
 
+std::vector<Melody>& MelodyDatabase::getCustomMelodiesList()
+{
+    static std::vector<Melody> customList;
+    return customList;
+}
+
+std::vector<Melody>& MelodyDatabase::getCombinedMelodiesList()
+{
+    static std::vector<Melody> combinedList;
+    return combinedList;
+}
+
+void MelodyDatabase::rebuildCombinedList()
+{
+    auto& combined = getCombinedMelodiesList();
+    combined.clear();
+
+    // Custom imported melodies appear at the top
+    for (const auto& m : getCustomMelodiesList())
+        combined.push_back(m);
+
+    static const std::vector<Melody> library = createMelodyLibrary();
+    for (const auto& m : library)
+        combined.push_back(m);
+}
+
 const std::vector<Melody>& MelodyDatabase::getAllMelodies()
 {
-    static const std::vector<Melody> library = createMelodyLibrary();
-    return library;
+    auto& combined = getCombinedMelodiesList();
+    if (combined.empty())
+        rebuildCombinedList();
+    return combined;
 }
 
 const Melody* MelodyDatabase::getMelodyById(const juce::String& id)
@@ -18,6 +49,356 @@ const Melody* MelodyDatabase::getMelodyById(const juce::String& id)
             return &m;
     }
     return list.empty() ? nullptr : &list[0];
+}
+
+void MelodyDatabase::addCustomMelody(const Melody& melody)
+{
+    auto& custom = getCustomMelodiesList();
+    for (auto& existing : custom)
+    {
+        if (existing.id == melody.id)
+        {
+            existing = melody;
+            rebuildCombinedList();
+            return;
+        }
+    }
+    custom.insert(custom.begin(), melody);
+    rebuildCombinedList();
+}
+
+void MelodyDatabase::removeCustomMelody(const juce::String& id)
+{
+    auto& custom = getCustomMelodiesList();
+    custom.erase(std::remove_if(custom.begin(), custom.end(),
+        [&id](const Melody& m) { return m.id == id; }), custom.end());
+    rebuildCombinedList();
+}
+
+static juce::String getGMInstrumentName(int program)
+{
+    static const char* const names[] = {
+        "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+        "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+        "Celesta", "Glockenspiel", "Music Box", "Vibraphone", "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+        "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ", "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+        "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+        "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+        "Acoustic Bass", "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass",
+        "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+        "Violin", "Viola", "Cello", "Contrabass", "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+        "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+        "Choir Aahs", "Voice Oohs", "Synth Choir", "Orchestra Hit",
+        "Trumpet", "Trombone", "Tuba", "Muted Trumpet", "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+        "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax", "Oboe", "English Horn", "Bassoon", "Clarinet",
+        "Piccolo", "Flute", "Recorder", "Pan Flute", "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+        "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)", "Lead 4 (chiff)",
+        "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass + lead)",
+        "Pad 1 (new age)", "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)",
+        "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)", "Pad 8 (sweep)"
+    };
+    if (program >= 0 && program < static_cast<int>(sizeof(names) / sizeof(names[0])))
+        return names[program];
+    return "Instrument";
+}
+
+std::vector<MidiChannelInfo> MelodyDatabase::inspectMidiChannels(const juce::File& file)
+{
+    std::vector<MidiChannelInfo> result;
+    if (!file.existsAsFile())
+        return result;
+
+    juce::FileInputStream inputStream(file);
+    if (!inputStream.openedOk())
+        return result;
+
+    juce::MidiFile midiFile;
+    if (!midiFile.readFrom(inputStream))
+        return result;
+
+    struct ChannelStat {
+        int noteCount = 0;
+        juce::String trackName;
+        int program = -1;
+        int lowestMidi = 127;
+        int highestMidi = 0;
+    };
+    std::vector<ChannelStat> stats(17); // Channels 1-16
+
+    for (int t = 0; t < midiFile.getNumTracks(); ++t)
+    {
+        const auto* track = midiFile.getTrack(t);
+        if (track == nullptr) continue;
+
+        juce::String trkName;
+        for (int e = 0; e < track->getNumEvents(); ++e)
+        {
+            const auto& msg = track->getEventPointer(e)->message;
+            if (msg.isTextMetaEvent())
+            {
+                juce::String txt = msg.getTextFromTextMetaEvent().trim();
+                if (txt.isNotEmpty() && trkName.isEmpty())
+                    trkName = txt;
+            }
+        }
+
+        for (int e = 0; e < track->getNumEvents(); ++e)
+        {
+            const auto& msg = track->getEventPointer(e)->message;
+            int ch = msg.getChannel();
+            if (ch >= 1 && ch <= 16)
+            {
+                if (trkName.isNotEmpty() && stats[ch].trackName.isEmpty())
+                    stats[ch].trackName = trkName;
+
+                if (msg.isProgramChange())
+                {
+                    stats[ch].program = msg.getProgramChangeNumber();
+                }
+                else if (msg.isNoteOn())
+                {
+                    stats[ch].noteCount++;
+                    int note = msg.getNoteNumber();
+                    if (note < stats[ch].lowestMidi) stats[ch].lowestMidi = note;
+                    if (note > stats[ch].highestMidi) stats[ch].highestMidi = note;
+                }
+            }
+        }
+    }
+
+    for (int ch = 1; ch <= 16; ++ch)
+    {
+        if (stats[ch].noteCount > 0)
+        {
+            MidiChannelInfo info;
+            info.channelNumber = ch;
+            info.noteCount = stats[ch].noteCount;
+            info.trackName = stats[ch].trackName;
+            info.lowestMidi = stats[ch].lowestMidi;
+            info.highestMidi = stats[ch].highestMidi;
+            info.isDrum = (ch == 10);
+
+            if (info.isDrum)
+                info.instrumentName = "Drums & Percussion";
+            else if (stats[ch].program >= 0)
+                info.instrumentName = getGMInstrumentName(stats[ch].program);
+            else
+                info.instrumentName = "Instrument";
+
+            result.push_back(info);
+        }
+    }
+
+    return result;
+}
+
+bool MelodyDatabase::loadMidiFile(const juce::File& file, juce::String& outMelodyId, int targetChannel)
+{
+    if (!file.existsAsFile())
+        return false;
+
+    juce::FileInputStream inputStream(file);
+    if (!inputStream.openedOk())
+        return false;
+
+    juce::MidiFile midiFile;
+    if (!midiFile.readFrom(inputStream))
+        return false;
+
+    short timeFormat = midiFile.getTimeFormat();
+    double ticksPerQuarter = (timeFormat > 0) ? static_cast<double>(timeFormat) : 480.0;
+
+    juce::MidiMessageSequence sequence;
+
+    const bool isSpecificChannel = (targetChannel >= 1 && targetChannel <= 16);
+    if (isSpecificChannel)
+    {
+        for (int t = 0; t < midiFile.getNumTracks(); ++t)
+        {
+            if (const auto* track = midiFile.getTrack(t))
+            {
+                for (int e = 0; e < track->getNumEvents(); ++e)
+                {
+                    const auto* holder = track->getEventPointer(e);
+                    if (holder->message.getChannel() == targetChannel || holder->message.isMetaEvent())
+                    {
+                        sequence.addEvent(holder->message);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        int bestTrack = 0;
+        int maxNoteEvents = 0;
+        for (int t = 0; t < midiFile.getNumTracks(); ++t)
+        {
+            const auto* trackSeq = midiFile.getTrack(t);
+            if (trackSeq != nullptr)
+            {
+                int noteCount = 0;
+                for (int e = 0; e < trackSeq->getNumEvents(); ++e)
+                {
+                    if (trackSeq->getEventPointer(e)->message.isNoteOn())
+                        noteCount++;
+                }
+                if (noteCount > maxNoteEvents)
+                {
+                    maxNoteEvents = noteCount;
+                    bestTrack = t;
+                }
+            }
+        }
+
+        if (maxNoteEvents > 0 && midiFile.getTrack(bestTrack) != nullptr)
+        {
+            sequence.addSequence(*midiFile.getTrack(bestTrack), 0.0);
+        }
+        else
+        {
+            for (int t = 0; t < midiFile.getNumTracks(); ++t)
+            {
+                if (const auto* track = midiFile.getTrack(t))
+                    sequence.addSequence(*track, 0.0);
+            }
+        }
+    }
+
+    sequence.updateMatchedPairs();
+
+    if (sequence.getNumEvents() == 0)
+        return false;
+
+    Melody m;
+    m.id = "custom-" + juce::String(juce::Time::currentTimeMillis());
+    m.title = file.getFileNameWithoutExtension();
+    m.composer = "Imported MIDI";
+    m.difficulty = "Medium";
+    m.bpm = 120;
+    m.timeSigNum = 4;
+    m.timeSigDen = 4;
+    m.key = "C Major";
+    m.isCustom = true;
+
+    // Extract meta info (tempo, time signature, track name)
+    for (int i = 0; i < sequence.getNumEvents(); ++i)
+    {
+        const auto& msg = sequence.getEventPointer(i)->message;
+        if (msg.isTempoMetaEvent())
+        {
+            double tempoSec = msg.getTempoSecondsPerQuarterNote();
+            if (tempoSec > 0.0)
+            {
+                int bpmVal = static_cast<int>(std::round(60.0 / tempoSec));
+                m.bpm = juce::jlimit(40, 240, bpmVal);
+            }
+        }
+        else if (msg.isTimeSignatureMetaEvent())
+        {
+            int num = 4, den = 4;
+            msg.getTimeSignatureInfo(num, den);
+            m.timeSigNum = num;
+            m.timeSigDen = den;
+        }
+        else if (msg.isTextMetaEvent() && !isSpecificChannel)
+        {
+            juce::String text = msg.getTextFromTextMetaEvent().trim();
+            if (text.isNotEmpty() && text.length() > 1 && m.title == file.getFileNameWithoutExtension())
+            {
+                m.title = text;
+            }
+        }
+    }
+
+    if (isSpecificChannel)
+    {
+        m.title = file.getFileNameWithoutExtension() + " (Ch " + juce::String(targetChannel) + ")";
+    }
+
+    struct RawNote {
+        int midi = 60;
+        double startTick = 0.0;
+        float duration = 1.0f;
+    };
+    std::vector<RawNote> rawNotes;
+
+    for (int i = 0; i < sequence.getNumEvents(); ++i)
+    {
+        const auto* holder = sequence.getEventPointer(i);
+        const auto& msg = holder->message;
+        if (msg.isNoteOn())
+        {
+            double startTick = msg.getTimeStamp();
+            double endTick = holder->noteOffObject != nullptr
+                ? holder->noteOffObject->message.getTimeStamp()
+                : startTick + ticksPerQuarter;
+
+            float rawDuration = static_cast<float>((endTick - startTick) / ticksPerQuarter);
+            
+            // Quantize duration to musical subdivisions (min 0.25 beats)
+            float quantized = std::max(0.25f, std::round(rawDuration * 4.0f) / 4.0f);
+            if (quantized > 4.0f) quantized = 4.0f;
+
+            RawNote rn;
+            rn.midi = msg.getNoteNumber();
+            rn.startTick = startTick;
+            rn.duration = quantized;
+            rawNotes.push_back(rn);
+        }
+    }
+
+    if (rawNotes.empty())
+        return false;
+
+    // Sort chronologically
+    std::sort(rawNotes.begin(), rawNotes.end(), [](const RawNote& a, const RawNote& b) {
+        if (std::abs(a.startTick - b.startTick) < 0.001)
+            return a.midi > b.midi; // Highest note first for chords
+        return a.startTick < b.startTick;
+    });
+
+    // Chord filter: keep highest note at each start tick
+    double lastTick = -9999.0;
+    double tickTolerance = ticksPerQuarter / 8.0;
+
+    for (const auto& rn : rawNotes)
+    {
+        if (m.notes.size() >= 80) // Limit practice length
+            break;
+
+        if (!m.notes.empty() && std::abs(rn.startTick - lastTick) <= tickTolerance)
+        {
+            continue;
+        }
+
+        MelodyNote mn;
+        mn.midi = rn.midi;
+        mn.duration = rn.duration;
+        mn.name = MusicTheory::getNoteInfo(rn.midi).fullName;
+        m.notes.push_back(mn);
+        lastTick = rn.startTick;
+    }
+
+    if (m.notes.empty())
+        return false;
+
+    if (isSpecificChannel)
+        m.description = "Imported from " + file.getFileName() + " [Ch " + juce::String(targetChannel) + "] (" + juce::String(m.notes.size()) + " notes)";
+    else
+        m.description = "Imported from " + file.getFileName() + " (" + juce::String(m.notes.size()) + " notes)";
+
+    // Estimate difficulty
+    if (m.notes.size() > 50 || m.bpm >= 130)
+        m.difficulty = "Hard";
+    else if (m.notes.size() > 25 || m.bpm >= 115)
+        m.difficulty = "Medium";
+    else
+        m.difficulty = "Easy";
+
+    outMelodyId = m.id;
+    addCustomMelody(m);
+    return true;
 }
 
 std::vector<Melody> MelodyDatabase::createMelodyLibrary()
@@ -85,11 +466,11 @@ std::vector<Melody> MelodyDatabase::createMelodyLibrary()
         list.push_back(m);
     }
 
-    // 4. Für Elise
+    // 4. Fur Elise
     {
         Melody m;
         m.id = "fur-elise";
-        m.title = "Für Elise";
+        m.title = juce::String::fromUTF8("F\xC3\xBCr Elise");
         m.composer = "L. van Beethoven";
         m.difficulty = "Medium";
         m.bpm = 132;
