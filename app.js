@@ -11,6 +11,7 @@ import { MidiManager } from './midi.js';
 import { MelodyTrainer } from './trainer.js?v=rhythm_fix_1';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
+import { DailyRoutineController } from './routine.js';
 
 class App {
   constructor() {
@@ -57,6 +58,15 @@ class App {
     this.audioLatencyValue = document.getElementById('audio-latency-value');
     this.toggleReverb = document.getElementById('toggle-reverb');
 
+    // Latency Calibration controls
+    this.latencyCalibValue = document.getElementById('latency-calib-value');
+    this.btnCalibMinus = document.getElementById('btn-calib-minus');
+    this.btnCalibPlus = document.getElementById('btn-calib-plus');
+    this.btnAutoCalib = document.getElementById('btn-auto-calib');
+    this.modalLatencyCalibValue = document.getElementById('modal-latency-calib-value');
+    this.btnModalCalibMinus = document.getElementById('btn-modal-calib-minus');
+    this.btnModalCalibPlus = document.getElementById('btn-modal-calib-plus');
+
     // App Mode Tabs & Practice HUD elements
     this.tabFreePlay = document.getElementById('tab-free-play');
     this.tabPractice = document.getElementById('tab-practice');
@@ -80,17 +90,26 @@ class App {
     this.visualBeatContainer = document.getElementById('visual-beat-container');
     this.countInBanner = document.getElementById('count-in-banner');
     this.countInNumber = document.getElementById('count-in-number');
+    this.silentAnalysisBanner = document.getElementById('silent-analysis-banner');
+    this.analysisTimerDisplay = document.getElementById('analysis-timer-display');
+    this.analysisProgressBar = document.getElementById('analysis-progress-bar');
+    this.btnSkipAnalysis = document.getElementById('btn-skip-analysis');
     this.selectPracticeMode = document.getElementById('select-practice-mode');
+    this.practiceRecoveryContainer = document.getElementById('practice-recovery-container');
+    this.practiceRecoveryDisplay = document.getElementById('practice-recovery-display');
     this.timingBadgeTimeout = null;
     this.practiceProgressText = document.getElementById('practice-progress-text');
     this.practiceProgressBar = document.getElementById('practice-progress-bar');
     this.modalMelodySelect = document.getElementById('modal-melody-select');
     this.modalScorecard = document.getElementById('modal-scorecard');
+    this.scoreFirstReadCert = document.getElementById('score-first-read-cert');
+    this.scoreBadgeRecoveries = document.getElementById('score-badge-recoveries');
     this.modalSettings = document.getElementById('modal-settings');
     this.btnOpenSettings = document.getElementById('btn-open-settings');
     this.btnCloseSettings = document.getElementById('btn-close-settings');
     this.btnSettingsDone = document.getElementById('btn-settings-done');
     this.btnScoreReview = document.getElementById('btn-score-review');
+    this.btnResetFirstRead = document.getElementById('btn-reset-first-read');
     this.melodyListContainer = document.getElementById('melody-list-container');
 
     // MIDI Channel Selection Modal references
@@ -107,8 +126,37 @@ class App {
     this.btnLoadMidi = document.getElementById('btn-load-midi');
     this.midiFileInput = document.getElementById('midi-file-input');
     this.midiModalDropzone = document.getElementById('midi-modal-dropzone');
-    this.dropOverlay = document.getElementById('drop-overlay');
-    this.toastContainer = document.getElementById('toast-container');
+    // Daily Routine DOM references
+    this.tabRoutine = document.getElementById('tab-routine');
+    this.routineHud = document.getElementById('routine-hud');
+    this.routineKeySelect = document.getElementById('routine-key-select');
+    this.routineStreakCount = document.getElementById('routine-streak-count');
+    this.routineMasterTimer = document.getElementById('routine-master-timer');
+    this.routinePhaseTimer = document.getElementById('routine-phase-timer');
+    this.btnRoutinePrev = document.getElementById('btn-routine-prev');
+    this.btnRoutinePlay = document.getElementById('btn-routine-play');
+    this.btnRoutinePlayIcon = document.getElementById('btn-routine-play-icon');
+    this.btnRoutinePlayText = document.getElementById('btn-routine-play-text');
+    this.btnRoutineSkip = document.getElementById('btn-routine-skip');
+    this.btnRoutineReset = document.getElementById('btn-routine-reset');
+    this.routineMasterProgressBar = document.getElementById('routine-master-progressbar');
+    this.routinePhaseBadge = document.getElementById('routine-phase-badge');
+    this.routinePhaseTitle = document.getElementById('routine-phase-title');
+    this.routinePhaseInstructions = document.getElementById('routine-phase-instructions');
+    this.routineRhythmTapBox = document.getElementById('routine-rhythm-tap-box');
+    this.btnRoutineTap = document.getElementById('btn-routine-tap');
+    this.routineTapFeedback = document.getElementById('routine-tap-feedback');
+    this.routineLookaheadBox = document.getElementById('routine-lookahead-box');
+    this.routineFlashBox = document.getElementById('routine-flash-box');
+    this.routineFlashCountdown = document.getElementById('routine-flash-countdown');
+    this.modalRoutineComplete = document.getElementById('modal-routine-complete');
+    this.routineSummaryStreak = document.getElementById('routine-summary-streak');
+    this.routineSummaryNotes = document.getElementById('routine-summary-notes');
+    this.routineSummaryAccuracy = document.getElementById('routine-summary-accuracy');
+    this.routineSummaryRecoveries = document.getElementById('routine-summary-recoveries');
+    this.routineSummaryRecoveryPts = document.getElementById('routine-summary-recovery-pts');
+    this.btnRoutineCompleteDone = document.getElementById('btn-routine-complete-done');
+    this.routine = null;
 
     this.init();
   }
@@ -120,6 +168,9 @@ class App {
       showNoteNames: true,
       mode: 'live'
     });
+
+    // Initialize Daily Routine Controller
+    this.routine = new DailyRoutineController(this.trainer, this.audio, this.notation);
 
     // Mistake review on sheet canvas callback (VST3 Parity)
     this.notation.onReviewNoteChanged = (index) => {
@@ -136,6 +187,7 @@ class App {
     // 3. Setup Audio, MIDI, and Trainer Hooks
     this.setupMidiEvents();
     this.setupTrainerEvents();
+    this.setupRoutineEvents();
     this.setupUIEventListeners();
     this.setupMidiFileLoader();
     this.populateMelodyModal();
@@ -146,6 +198,7 @@ class App {
     this.midi.enableComputerKeyboard();
     this.updateOctaveDisplay();
     this.populateAudioOutputDevices();
+    this.updateLatencyCalibrationDisplay(this.trainer.latencyCompensationMs);
 
     // 5. Unlock AudioContext on first gesture anywhere
     const unlockAudio = async () => {
@@ -327,6 +380,41 @@ class App {
   }
 
   /**
+   * Update Latency Calibration display and preset highlights
+   */
+  updateLatencyCalibrationDisplay(val) {
+    const text = `${val >= 0 ? '+' : ''}${val} ms`;
+    if (this.latencyCalibValue) {
+      this.latencyCalibValue.innerText = text;
+      this.latencyCalibValue.className = (val !== 0) 
+        ? 'text-amber-300 font-bold px-1 select-none min-w-[46px] text-center' 
+        : 'text-sky-300 font-bold px-1 select-none min-w-[46px] text-center';
+    }
+    if (this.modalLatencyCalibValue) {
+      this.modalLatencyCalibValue.innerText = text;
+      this.modalLatencyCalibValue.className = (val !== 0)
+        ? 'text-amber-300 font-bold px-1.5 min-w-[50px] text-center select-none'
+        : 'text-sky-300 font-bold px-1.5 min-w-[50px] text-center select-none';
+    }
+    // Highlight matching preset buttons
+    document.querySelectorAll('.btn-calib-preset').forEach(btn => {
+      const pVal = parseInt(btn.dataset.offset, 10);
+      if (pVal === val) {
+        btn.classList.add('bg-sky-500/30', 'text-sky-300', 'border-sky-500/50');
+        btn.classList.remove('bg-slate-900', 'bg-slate-800', 'text-slate-300');
+      } else {
+        btn.classList.remove('bg-sky-500/30', 'text-sky-300', 'border-sky-500/50');
+        btn.classList.add('text-slate-300');
+      }
+    });
+  }
+
+  setLatencyCalibration(val) {
+    const newVal = this.trainer.setLatencyCompensation(val);
+    this.updateLatencyCalibrationDisplay(newVal);
+  }
+
+  /**
    * Set up callbacks from Melody Trainer
    */
   setupTrainerEvents() {
@@ -386,8 +474,48 @@ class App {
       }
     };
 
+    this.trainer.onPlayheadMove = (beats) => {
+      this.notation.setPlayheadBeats(beats);
+    };
+
+    this.trainer.onRecovery = (info) => {
+      this.notation.triggerRecoveryFlash();
+      if (this.practiceRecoveryDisplay) {
+        this.practiceRecoveryDisplay.innerText = `⚡ ${info.recoveries}`;
+      }
+      this.showToast(`⚡ In-Tempo Recovery! (+${info.bonusPoints} bonus points)`, 'success');
+    };
+
+    this.trainer.onAnalysisTick = (remaining, total) => {
+      if (this.silentAnalysisBanner) {
+        this.silentAnalysisBanner.classList.remove('hidden');
+      }
+      if (this.analysisTimerDisplay) {
+        this.analysisTimerDisplay.innerText = `${remaining}s`;
+      }
+      if (this.analysisProgressBar) {
+        const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+        this.analysisProgressBar.style.width = `${pct}%`;
+      }
+    };
+
+    this.trainer.onAnalysisComplete = () => {
+      if (this.silentAnalysisBanner) {
+        this.silentAnalysisBanner.classList.add('hidden');
+      }
+      this.showToast('Analysis complete! 4-beat count-in starting...', 'info');
+    };
+
+    this.trainer.onFirstReadLocked = (record) => {
+      this.showToast(`🔒 "${record.title || 'Excerpt'}" was already completed in First-Read (${record.sightReadingScore || record.rhythmAccuracy}%). Select another or practice in Strict Time.`, 'warning');
+    };
+
     this.trainer.onComplete = (summary) => {
-      this.showScorecard(summary);
+      if (this.appMode === 'routine' && this.routine) {
+        this.routine.onTrainerMelodyComplete(summary);
+      } else {
+        this.showScorecard(summary);
+      }
     };
   }
 
@@ -458,8 +586,10 @@ class App {
     // Mark note as actively playing
     this.activeNotes.set(midi, true);
 
-    // Audio sound
-    this.audio.noteOn(midi, velocity);
+    // Audio sound (muted during silent analysis!)
+    if (!this.trainer.isAnalyzing) {
+      this.audio.noteOn(midi, velocity);
+    }
 
     // Notation canvas
     this.notation.noteOn(midi, velocity);
@@ -467,7 +597,7 @@ class App {
     // Visual piano key
     this.setKeyActive(midi, true, velocity);
 
-    if (this.appMode === 'practice') {
+    if (this.appMode === 'practice' || this.appMode === 'routine') {
       const playedInfo = MusicTheory.getNoteInfo(midi, this.preferFlats);
       if (this.practicePlayedNote) {
         this.practicePlayedNote.innerText = playedInfo.fullName;
@@ -478,7 +608,7 @@ class App {
           this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-rose-400';
         }
       }
-      // In practice mode, evaluate played note against expected melody note
+      // In practice or routine mode, evaluate played note against expected melody note
       this.trainer.onNotePlayed(midi, velocity);
     } else {
       // Free play mode: update chord recognition
@@ -498,7 +628,7 @@ class App {
     this.audio.noteOff(midi);
     this.setKeyActive(midi, false);
 
-    if (this.appMode === 'practice') {
+    if (this.appMode === 'practice' || this.appMode === 'routine') {
       this.trainer.onNoteReleased(midi);
     } else {
       this.updateChordDisplay();
@@ -521,17 +651,41 @@ class App {
   }
 
   /**
-   * Switch between Free Play and Melody Trainer
+   * Switch between Free Play, Melody Trainer, and Daily Routine
    */
   setAppMode(mode) {
     this.appMode = mode;
 
-    if (mode === 'practice') {
-      this.tabFreePlay.classList.remove('active');
-      this.tabPractice.classList.add('active');
-      this.freeplayHud.classList.add('hidden');
-      this.practiceHud.classList.remove('hidden');
+    if (mode === 'routine') {
+      this.tabFreePlay?.classList.remove('active');
+      this.tabPractice?.classList.remove('active');
+      this.tabRoutine?.classList.add('active');
+      this.freeplayHud?.classList.add('hidden');
+      this.practiceHud?.classList.add('hidden');
+      this.routineHud?.classList.remove('hidden');
 
+      this.clearReviewPianoKeys();
+      this.routine?.startOrResume();
+
+      if (this.notation && this.trainer.currentMelody) {
+        this.notation.setPracticeState({
+          melody: this.trainer.currentMelody,
+          noteIndex: this.trainer.noteIndex,
+          noteResults: this.trainer.noteResults,
+          isFinished: this.trainer.isFinished,
+          mode: this.trainer.mode
+        });
+      }
+      this.updateTargetKeyHint();
+    } else if (mode === 'practice') {
+      this.tabFreePlay?.classList.remove('active');
+      this.tabRoutine?.classList.remove('active');
+      this.tabPractice?.classList.add('active');
+      this.freeplayHud?.classList.add('hidden');
+      this.routineHud?.classList.add('hidden');
+      this.practiceHud?.classList.remove('hidden');
+
+      this.routine?.pause();
       this.clearReviewPianoKeys();
       // Update Notation Renderer to practice mode
       this.trainer.restart();
@@ -545,11 +699,14 @@ class App {
 
       this.updateTargetKeyHint();
     } else {
-      this.tabPractice.classList.remove('active');
-      this.tabFreePlay.classList.add('active');
-      this.practiceHud.classList.add('hidden');
-      this.freeplayHud.classList.remove('hidden');
+      this.tabPractice?.classList.remove('active');
+      this.tabRoutine?.classList.remove('active');
+      this.tabFreePlay?.classList.add('active');
+      this.practiceHud?.classList.add('hidden');
+      this.routineHud?.classList.add('hidden');
+      this.freeplayHud?.classList.remove('hidden');
 
+      this.routine?.pause();
       this.clearReviewPianoKeys();
       this.removeTargetKeyHint();
       this.trainer.stopMetronome();
@@ -653,13 +810,40 @@ class App {
     this.practiceProgressText.innerText = `Note ${Math.min(state.noteIndex + 1, state.totalNotes)} of ${state.totalNotes}`;
     this.practiceProgressBar.style.width = `${progressPercent}%`;
 
+    // Tempo Recovery Badge
+    if (state.mode === 'strict' || state.mode === 'first_read') {
+      this.practiceRecoveryContainer?.classList.remove('hidden');
+      if (this.practiceRecoveryDisplay) {
+        this.practiceRecoveryDisplay.innerText = `⚡ ${state.recoveries || 0}`;
+      }
+    } else {
+      this.practiceRecoveryContainer?.classList.add('hidden');
+    }
+
+    // Silent Analysis Banner
+    if (state.isAnalyzing) {
+      this.silentAnalysisBanner?.classList.remove('hidden');
+      if (this.analysisTimerDisplay) {
+        this.analysisTimerDisplay.innerText = `${state.analysisSecondsRemaining}s`;
+      }
+      if (this.analysisProgressBar) {
+        const pct = Math.max(0, Math.min(100, (state.analysisSecondsRemaining / state.analysisTotalSeconds) * 100));
+        this.analysisProgressBar.style.width = `${pct}%`;
+      }
+    } else {
+      this.silentAnalysisBanner?.classList.add('hidden');
+    }
+
     // Forward to notation renderer
     this.notation.setPracticeState({
       melody: state.melody,
       noteIndex: state.noteIndex,
       noteResults: state.noteResults,
       isFinished: state.isFinished,
-      mode: state.mode
+      mode: state.mode,
+      playheadBeats: state.playheadBeats,
+      isCountingIn: state.isCountingIn,
+      isAnalyzing: state.isAnalyzing
     });
 
     // Update target key hint on virtual piano
@@ -789,6 +973,11 @@ class App {
         ? `<button class="btn-delete-custom text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors ml-1" title="Remove custom melody">🗑️</button>`
         : '';
 
+      const firstReadRecord = this.trainer.getFirstReadRecord(melody.id);
+      const firstReadBadge = firstReadRecord
+        ? `<span class="text-[9px] font-black px-1.5 py-0.5 rounded border uppercase bg-amber-500/20 text-amber-300 border-amber-500/40" title="Completed First-Read with ${firstReadRecord.sightReadingScore || firstReadRecord.rhythmAccuracy}% on ${firstReadRecord.dateStr}">🔒 FIRST-READ ${firstReadRecord.sightReadingScore || firstReadRecord.rhythmAccuracy}%</span>`
+        : `<span class="text-[9px] font-black px-1.5 py-0.5 rounded border uppercase bg-sky-500/15 text-sky-400 border-sky-500/30">⚡ FIRST-READ READY</span>`;
+
       card.innerHTML = `
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-sky-400 text-sm">
@@ -798,6 +987,7 @@ class App {
             <div class="flex items-center gap-2">
               <h4 class="font-bold text-white text-sm">${melody.title}</h4>
               ${customBadge}
+              ${firstReadBadge}
               <span class="text-[9px] font-extrabold px-2 py-0.5 rounded border uppercase ${diffBadgeColor}">${melody.difficulty}</span>
             </div>
             <p class="text-xs text-slate-400">${melody.composer} • ${melody.description}</p>
@@ -828,6 +1018,11 @@ class App {
       }
 
       card.addEventListener('click', () => {
+        if (this.trainer.mode === 'first_read' && this.trainer.isMelodyFirstReadLocked(melody.id)) {
+          const rec = this.trainer.getFirstReadRecord(melody.id);
+          this.showToast(`🔒 "${melody.title}" was already completed in First-Read (${rec.sightReadingScore || rec.rhythmAccuracy}%). Loading in Strict Time mode instead.`, 'warning');
+          this.trainer.setMode('strict');
+        }
         this.trainer.loadMelody(melody.id);
         this.closeMelodyModal();
         this.setAppMode('practice');
@@ -1172,6 +1367,26 @@ class App {
     if (badgeGreat) badgeGreat.innerText = `🟡 ${summary.greatHits} Early/Late`;
     if (badgeMissed) badgeMissed.innerText = `🔴 ${summary.missedNotes} Missed`;
 
+    // First-Read Certificate Banner
+    if (this.scoreFirstReadCert) {
+      if (summary.isFirstRead) {
+        this.scoreFirstReadCert.classList.remove('hidden');
+        titleEl.innerText = summary.stars >= 2 ? '🏆 Certified First-Read!' : 'First-Read Completed!';
+      } else {
+        this.scoreFirstReadCert.classList.add('hidden');
+      }
+    }
+
+    // Recoveries Breakdown Badge
+    if (this.scoreBadgeRecoveries) {
+      if (summary.recoveries > 0) {
+        this.scoreBadgeRecoveries.classList.remove('hidden');
+        this.scoreBadgeRecoveries.innerText = `⚡ ${summary.recoveries} ${summary.recoveries === 1 ? 'Recovery' : 'Recoveries'}`;
+      } else {
+        this.scoreBadgeRecoveries.classList.add('hidden');
+      }
+    }
+
     if (summary.stars === 3) {
       feedbackMsgEl.innerText = '🌟 Outstanding! Flawless pitch accuracy and spot-on rhythm timing with the metronome.';
     } else if (summary.stars === 2) {
@@ -1459,6 +1674,151 @@ class App {
     }
   }
 
+  setupRoutineEvents() {
+    if (!this.routine) return;
+
+    this.routine.onTick = (progress) => {
+      // Update master clock & phase timer
+      if (this.routineMasterTimer) {
+        const mElapsed = String(Math.floor(progress.totalElapsed / 60)).padStart(2, '0');
+        const sElapsed = String(progress.totalElapsed % 60).padStart(2, '0');
+        this.routineMasterTimer.innerText = `${mElapsed}:${sElapsed} / 20:00`;
+      }
+      if (this.routinePhaseTimer) {
+        const mPhase = String(Math.floor(progress.phaseRemaining / 60)).padStart(2, '0');
+        const sPhase = String(progress.phaseRemaining % 60).padStart(2, '0');
+        this.routinePhaseTimer.innerText = `${mPhase}:${sPhase}`;
+      }
+      if (this.routineMasterProgressBar) {
+        this.routineMasterProgressBar.style.width = `${progress.percentTotal}%`;
+      }
+      if (this.routineStreakCount) {
+        this.routineStreakCount.innerText = progress.streak.toString();
+      }
+
+      // Update Play/Pause button UI
+      if (this.btnRoutinePlayIcon && this.btnRoutinePlayText && this.btnRoutinePlay) {
+        if (progress.isRunning) {
+          this.btnRoutinePlayIcon.innerText = '⏸️';
+          this.btnRoutinePlayText.innerText = 'Pause';
+          this.btnRoutinePlay.className = 'px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow-md shadow-amber-500/30 flex items-center gap-1.5';
+        } else {
+          this.btnRoutinePlayIcon.innerText = '▶️';
+          this.btnRoutinePlayText.innerText = 'Start';
+          this.btnRoutinePlay.className = 'px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all shadow-md shadow-emerald-500/30 flex items-center gap-1.5';
+        }
+      }
+    };
+
+    this.routine.onPhaseChange = (phase, progress) => {
+      // Update Phase Badge & Title
+      if (this.routinePhaseBadge) {
+        this.routinePhaseBadge.innerText = `Block ${phase.blockIndex} • Part ${phase.title.includes('Part 2') ? '2' : '1'}`;
+      }
+      if (this.routinePhaseTitle) {
+        this.routinePhaseTitle.innerText = phase.title;
+      }
+      if (this.routinePhaseInstructions) {
+        this.routinePhaseInstructions.innerText = phase.methodology;
+      }
+
+      // Update 4-Block Pills
+      for (let b = 1; b <= 4; b++) {
+        const pill = document.getElementById(`block-tab-${b}`);
+        if (!pill) continue;
+        pill.classList.remove('active', 'completed');
+        if (b === phase.blockIndex) {
+          pill.classList.add('active');
+        } else if (b < phase.blockIndex) {
+          pill.classList.add('completed');
+        }
+      }
+
+      // Toggle Context Panels
+      if (this.routineRhythmTapBox) {
+        if (phase.type === 'rhythm_tap') {
+          this.routineRhythmTapBox.classList.remove('hidden');
+        } else {
+          this.routineRhythmTapBox.classList.add('hidden');
+        }
+      }
+
+      if (this.routineLookaheadBox) {
+        if (phase.lookahead) {
+          this.routineLookaheadBox.classList.remove('hidden');
+        } else {
+          this.routineLookaheadBox.classList.add('hidden');
+        }
+      }
+
+      if (this.routineFlashBox) {
+        if (phase.type === 'flash') {
+          this.routineFlashBox.classList.remove('hidden');
+        } else {
+          this.routineFlashBox.classList.add('hidden');
+        }
+      }
+
+      // Sync key signature selector in toolbar
+      const keySigSelect = document.getElementById('select-key-signature');
+      if (keySigSelect && phase.exercise && phase.exercise.key) {
+        keySigSelect.value = phase.exercise.key;
+        this.notation.setKeySignature(phase.exercise.key);
+      }
+
+      // Update practice target hint
+      this.updateTargetKeyHint();
+
+      // Update notation renderer state
+      if (this.notation && this.trainer.currentMelody) {
+        this.notation.setPracticeState({
+          melody: this.trainer.currentMelody,
+          noteIndex: this.trainer.noteIndex,
+          noteResults: this.trainer.noteResults,
+          isFinished: this.trainer.isFinished,
+          mode: this.trainer.mode
+        });
+      }
+    };
+
+    this.routine.onTapFeedback = (feedback) => {
+      if (this.routineTapFeedback) {
+        this.routineTapFeedback.innerText = feedback.label;
+        this.routineTapFeedback.style.color = feedback.color;
+      }
+    };
+
+    this.routine.onFlashCountdown = (seconds, phase) => {
+      if (this.routineFlashCountdown) {
+        this.routineFlashCountdown.innerText = seconds.toString();
+      }
+    };
+
+    this.routine.onComplete = (summary) => {
+      this.openRoutineCompleteModal(summary);
+    };
+  }
+
+  openRoutineCompleteModal(summary) {
+    if (!this.modalRoutineComplete) return;
+    if (this.routineSummaryStreak) {
+      this.routineSummaryStreak.innerText = `${summary.streak} Day${summary.streak === 1 ? '' : 's'}`;
+    }
+    if (this.routineSummaryNotes) {
+      this.routineSummaryNotes.innerText = summary.notesPlayed.toString();
+    }
+    if (this.routineSummaryAccuracy) {
+      this.routineSummaryAccuracy.innerText = `${summary.accuracy}%`;
+    }
+    if (this.routineSummaryRecoveries) {
+      this.routineSummaryRecoveries.innerText = summary.recoveries.toString();
+    }
+    if (this.routineSummaryRecoveryPts) {
+      this.routineSummaryRecoveryPts.innerText = `+${summary.recoveryPoints}`;
+    }
+    this.modalRoutineComplete.classList.add('open');
+  }
+
   setupUIEventListeners() {
     // Mode Switcher Tabs
     this.tabFreePlay?.addEventListener('click', () => {
@@ -1466,6 +1826,57 @@ class App {
     });
     this.tabPractice?.addEventListener('click', () => {
       this.setAppMode('practice');
+    });
+    this.tabRoutine?.addEventListener('click', () => {
+      this.setAppMode('routine');
+    });
+
+    // Routine Key Selector
+    this.routineKeySelect?.addEventListener('change', (e) => {
+      this.routine?.setTargetKey(e.target.value);
+    });
+
+    // Routine Player Buttons
+    this.btnRoutinePlay?.addEventListener('click', () => {
+      this.routine?.togglePlay();
+    });
+    this.btnRoutinePrev?.addEventListener('click', () => {
+      this.routine?.prevSubPhase();
+    });
+    this.btnRoutineSkip?.addEventListener('click', () => {
+      this.routine?.skipSubPhase();
+    });
+    this.btnRoutineReset?.addEventListener('click', () => {
+      this.routine?.reset();
+    });
+
+    // Routine Rhythm Tap Button
+    this.btnRoutineTap?.addEventListener('click', () => {
+      this.routine?.registerRhythmTap();
+    });
+
+    // Completion modal Done button
+    this.btnRoutineCompleteDone?.addEventListener('click', () => {
+      this.modalRoutineComplete?.classList.remove('open');
+    });
+    this.modalRoutineComplete?.addEventListener('click', (e) => {
+      if (e.target === this.modalRoutineComplete) this.modalRoutineComplete.classList.remove('open');
+    });
+
+    // Spacebar listener for Rhythm Tap / Pause in Routine Mode
+    window.addEventListener('keydown', (e) => {
+      if (this.appMode === 'routine' && e.code === 'Space') {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+          e.preventDefault();
+          const phase = this.routine?.getCurrentPhase();
+          if (phase && phase.type === 'rhythm_tap') {
+            this.routine.registerRhythmTap();
+          } else {
+            this.routine.togglePlay();
+          }
+        }
+      }
     });
 
     // Melody Trainer controls
@@ -1529,9 +1940,28 @@ class App {
       this.trainer.setBpm(this.trainer.bpm + 5);
     });
 
-    // Practice mode selection (wait vs tempo)
+    // Practice mode selection
     document.getElementById('select-practice-mode')?.addEventListener('change', (e) => {
-      this.trainer.setMode(e.target.value);
+      const newMode = e.target.value;
+      if (newMode === 'first_read' && this.trainer.isMelodyFirstReadLocked(this.trainer.currentMelody?.id)) {
+        const rec = this.trainer.getFirstReadRecord(this.trainer.currentMelody.id);
+        this.showToast(`🔒 "${this.trainer.currentMelody.title}" has already been completed in First-Read (${rec.sightReadingScore || rec.rhythmAccuracy}% on ${rec.dateStr}). Select another melody to challenge First-Read.`, 'warning');
+      }
+      this.trainer.setMode(newMode);
+    });
+
+    // Skip silent analysis early button
+    this.btnSkipAnalysis?.addEventListener('click', () => {
+      this.trainer.skipSilentAnalysis();
+    });
+
+    // Reset First-Read lockouts button in Settings
+    this.btnResetFirstRead?.addEventListener('click', () => {
+      if (confirm('Reset all First-Read records? You will be able to play all excerpts again as first-read challenges.')) {
+        this.trainer.resetFirstReadRecords();
+        this.populateMelodyModal();
+        this.showToast('First-Read challenge records reset.', 'info');
+      }
     });
 
     // Scorecard modal buttons
@@ -1617,6 +2047,40 @@ class App {
       this.setLowLatencyMode(!this.audio.lowLatencyMode);
     });
 
+    // Latency Calibration Offset Steppers & Presets
+    this.btnCalibMinus?.addEventListener('click', () => {
+      this.setLatencyCalibration(this.trainer.latencyCompensationMs - 10);
+    });
+    this.btnCalibPlus?.addEventListener('click', () => {
+      this.setLatencyCalibration(this.trainer.latencyCompensationMs + 10);
+    });
+    this.btnModalCalibMinus?.addEventListener('click', () => {
+      this.setLatencyCalibration(this.trainer.latencyCompensationMs - 10);
+    });
+    this.btnModalCalibPlus?.addEventListener('click', () => {
+      this.setLatencyCalibration(this.trainer.latencyCompensationMs + 10);
+    });
+
+    document.querySelectorAll('.btn-calib-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const offset = parseInt(btn.dataset.offset, 10);
+        if (!isNaN(offset)) {
+          this.setLatencyCalibration(offset);
+          this.showToast(`🎯 Latency Offset set to ${offset}ms`, 'info');
+        }
+      });
+    });
+
+    this.btnAutoCalib?.addEventListener('click', () => {
+      if (this.trainer.lastRawOffsetMs !== null) {
+        const offset = Math.round(this.trainer.lastRawOffsetMs);
+        this.setLatencyCalibration(offset);
+        this.showToast(`🎯 Auto-Calibrated: Offset locked to ${offset >= 0 ? '+' : ''}${offset}ms`, 'success');
+      } else {
+        this.showToast('Play a note first to measure your hardware latency!', 'warning');
+      }
+    });
+
     // Audio Output Device (Sound Card / Interface)
     if (this.audioOutputSelect) {
       this.audioOutputSelect.addEventListener('change', async (e) => {
@@ -1657,6 +2121,80 @@ class App {
     if (toggleNoteNames) {
       toggleNoteNames.addEventListener('change', (e) => {
         this.notation.setOption('showNoteNames', e.target.checked);
+      });
+    }
+
+    // Key Signature Selector (Free Play & Reference)
+    const selectKeySig = document.getElementById('select-key-signature');
+    if (selectKeySig) {
+      selectKeySig.addEventListener('change', (e) => {
+        const key = e.target.value;
+        this.notation.setOption('keySignature', key);
+        // If the key has flats (e.g. F, Bb, Eb, Ab), auto-prefer flats
+        if (key.includes('♭') || key === 'F Major' || key === 'Bb Major' || key === 'Eb Major' || key === 'Ab Major' || key === 'D Minor') {
+          this.preferFlats = true;
+          this.notation.setOption('preferFlats', true);
+          const toggleAcc = document.getElementById('toggle-accidentals');
+          if (toggleAcc) toggleAcc.innerText = '♭ Flats';
+          this.updatePianoKeyLabels();
+        }
+        this.showToast(`Key set to ${key}. Scale muscle memory active; deviations trigger Accidental Alert.`, 'info');
+      });
+    }
+
+    // Interval Contour Ribbon Toggle
+    const toggleIntervalContour = document.getElementById('toggle-interval-contour');
+    if (toggleIntervalContour) {
+      toggleIntervalContour.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        this.notation.setOption('showIntervalContour', enabled);
+        this.showToast(enabled ? 'Interval Contours ON: Green (Steps), Orange (Skips/3rds), Purple (Leaps)' : 'Interval Contours OFF', 'info');
+      });
+    }
+
+    // Accidental Alert Flash Toggle
+    const toggleAccidentalAlert = document.getElementById('toggle-accidental-alert');
+    if (toggleAccidentalAlert) {
+      toggleAccidentalAlert.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        this.notation.setOption('accidentalAlert', enabled);
+        this.showToast(enabled ? 'Accidental Alert ON: Luminous warning flash on printed accidentals deviating from key' : 'Accidental Alert OFF', 'info');
+      });
+    }
+
+    // Decoupled Eye Pacer (+1 Bar) Toggle
+    const toggleEyeCursor = document.getElementById('toggle-eye-cursor');
+    if (toggleEyeCursor) {
+      const savedEye = localStorage.getItem('midisheet_eye_cursor') === 'true';
+      toggleEyeCursor.checked = savedEye;
+      this.notation.setOption('decoupledEyeCursor', savedEye);
+
+      toggleEyeCursor.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        this.notation.setOption('decoupledEyeCursor', enabled);
+        localStorage.setItem('midisheet_eye_cursor', enabled ? 'true' : 'false');
+        this.showToast(enabled ? '👁 Eye Pacer (+1 Bar) ON: Visual pacing guide fixed 1 measure ahead of audio' : 'Eye Pacer OFF', 'info');
+      });
+    }
+
+    // Visual Disrupter / Buffer Training Mode
+    const selectDisrupterMode = document.getElementById('select-disrupter-mode');
+    if (selectDisrupterMode) {
+      const savedDisrupter = localStorage.getItem('midisheet_disrupter_mode') || 'none';
+      selectDisrupterMode.value = savedDisrupter;
+      this.notation.setOption('disrupterMode', savedDisrupter);
+
+      selectDisrupterMode.addEventListener('change', (e) => {
+        const mode = e.target.value;
+        this.notation.setOption('disrupterMode', mode);
+        localStorage.setItem('midisheet_disrupter_mode', mode);
+        if (mode === 'vanishing_bar') {
+          this.showToast('🧠 Vanishing Bar ON: Active bar is masked into short-term buffer; look at next bar!', 'info');
+        } else if (mode === 'advance_curtain') {
+          this.showToast('⛔ Advance Curtain ON: Trailing curtain blocks visual lingering on played notes!', 'info');
+        } else {
+          this.showToast('Visual Disrupter OFF: Standard notation view.', 'info');
+        }
       });
     }
 

@@ -5,7 +5,7 @@ namespace MidiSheet
 {
 
 MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p)
+    : AudioProcessorEditor(&p), audioProcessor(p), dailyRoutine(p.getRoutineManager())
 {
     // Enable resizable plugin window
     setResizable(true, true);
@@ -20,6 +20,9 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
         else
             virtualPiano.clearReviewNotes();
     };
+    grandStaff.onSkipSilentAnalysisClicked = [this]() {
+        audioProcessor.getScorer().skipSilentAnalysis();
+    };
     addAndMakeVisible(grandStaff);
 
     // 2. Add Scoreboard HUD Component
@@ -31,16 +34,54 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
     scoreboard.onRestartClicked = [this]() {
         virtualPiano.clearReviewNotes();
         audioProcessor.getScorer().restart();
-        grandStaff.setPracticeMelody(&audioProcessor.getScorer().getCurrentMelody(),
-                                     audioProcessor.getScorer().getCurrentNoteIndex(),
-                                     audioProcessor.getScorer().isFinished());
+        const auto& scorer = audioProcessor.getScorer();
+        grandStaff.setPracticeState(&scorer.getCurrentMelody(),
+                                     scorer.getCurrentNoteIndex(),
+                                     scorer.isFinished(),
+                                     scorer.getPracticeMode(),
+                                     scorer.getCurrentPlayheadBeats(),
+                                     scorer.getIsCountingIn(),
+                                     scorer.isSilentAnalyzing(),
+                                     scorer.getAnalysisSecondsRemaining(),
+                                     scorer.getCountInBeat(),
+                                     scorer.getCountInTotal());
         if (auto* target = audioProcessor.getScorer().getCurrentTargetNote())
             virtualPiano.setTargetNote(target->midi);
     };
     scoreboard.onModeChanged = [this](PracticeMode mode) {
         audioProcessor.getScorer().setPracticeMode(mode);
     };
+    scoreboard.onDisrupterModeChanged = [this](VisualDisrupterMode mode) {
+        grandStaff.setVisualDisrupterMode(mode);
+        audioProcessor.setVisualDisrupterMode(mode);
+    };
+    scoreboard.onEyeCursorToggled = [this](bool enabled) {
+        grandStaff.setDecoupledEyeCursorEnabled(enabled);
+        audioProcessor.setDecoupledEyeCursorEnabled(enabled);
+    };
+    scoreboard.onMetronomeToggled = [this](bool enabled) {
+        audioProcessor.setMetronomeEnabled(enabled);
+    };
+    scoreboard.onRoutineClicked = [this]() {
+        isRoutineMode = true;
+        audioProcessor.setRoutineMode(true);
+        scoreboard.setVisible(false);
+        dailyRoutine.setVisible(true);
+        audioProcessor.getRoutineManager().startOrResume();
+        resized();
+    };
     addAndMakeVisible(scoreboard);
+
+    // 2b. Add Daily Routine Component (initially hidden)
+    dailyRoutine.onExitRoutineMode = [this]() {
+        isRoutineMode = false;
+        audioProcessor.setRoutineMode(false);
+        dailyRoutine.setVisible(false);
+        scoreboard.setVisible(true);
+        audioProcessor.getScorer().restart();
+        resized();
+    };
+    addChildComponent(dailyRoutine);
 
     // 3. Add Virtual Piano Keyboard Component
     virtualPiano.onNoteTriggered = [this](int midi, int velocity) {
@@ -65,9 +106,17 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
     melodySelector.onMelodySelected = [this](const juce::String& melodyId) {
         virtualPiano.clearReviewNotes();
         audioProcessor.getScorer().loadMelody(melodyId);
-        grandStaff.setPracticeMelody(&audioProcessor.getScorer().getCurrentMelody(),
-                                     audioProcessor.getScorer().getCurrentNoteIndex(),
-                                     audioProcessor.getScorer().isFinished());
+        const auto& scorer = audioProcessor.getScorer();
+        grandStaff.setPracticeState(&scorer.getCurrentMelody(),
+                                    scorer.getCurrentNoteIndex(),
+                                    scorer.isFinished(),
+                                    scorer.getPracticeMode(),
+                                    scorer.getCurrentPlayheadBeats(),
+                                    scorer.getIsCountingIn(),
+                                    scorer.isSilentAnalyzing(),
+                                    scorer.getAnalysisSecondsRemaining(),
+                                    scorer.getCountInBeat(),
+                                    scorer.getCountInTotal());
         grandStaff.setNoteEvaluations(&audioProcessor.getScorer().getNoteEvaluations());
         if (auto* target = audioProcessor.getScorer().getCurrentTargetNote())
             virtualPiano.setTargetNote(target->midi);
@@ -82,10 +131,23 @@ MidiSheetAudioProcessorEditor::MidiSheetAudioProcessorEditor(MidiSheetAudioProce
     addChildComponent(melodySelector);
 
     // Initial state
-    grandStaff.setPracticeMelody(&audioProcessor.getScorer().getCurrentMelody(),
-                                 audioProcessor.getScorer().getCurrentNoteIndex(),
-                                 audioProcessor.getScorer().isFinished());
+    const auto& initScorer = audioProcessor.getScorer();
+    grandStaff.setPracticeState(&initScorer.getCurrentMelody(),
+                                initScorer.getCurrentNoteIndex(),
+                                initScorer.isFinished(),
+                                initScorer.getPracticeMode(),
+                                initScorer.getCurrentPlayheadBeats(),
+                                initScorer.getIsCountingIn(),
+                                initScorer.isSilentAnalyzing(),
+                                initScorer.getAnalysisSecondsRemaining(),
+                                initScorer.getCountInBeat(),
+                                initScorer.getCountInTotal());
     grandStaff.setNoteEvaluations(&audioProcessor.getScorer().getNoteEvaluations());
+    grandStaff.setVisualDisrupterMode(audioProcessor.getVisualDisrupterMode());
+    grandStaff.setDecoupledEyeCursorEnabled(audioProcessor.isDecoupledEyeCursorEnabled());
+    scoreboard.setDisrupterMode(audioProcessor.getVisualDisrupterMode());
+    scoreboard.setEyeCursorEnabled(audioProcessor.isDecoupledEyeCursorEnabled());
+    scoreboard.setMetronomeEnabled(audioProcessor.isMetronomeEnabled());
     if (auto* target = audioProcessor.getScorer().getCurrentTargetNote())
         virtualPiano.setTargetNote(target->midi);
 
@@ -103,15 +165,23 @@ void MidiSheetAudioProcessorEditor::resized()
     const auto bounds = getLocalBounds();
     const int padding = 12;
 
-    // Top: Scoreboard HUD (height: 72px)
-    scoreboard.setBounds(padding, padding, bounds.getWidth() - padding * 2, 72);
-
     // Bottom: Virtual Piano Keyboard (height: 110px)
     const int pianoY = bounds.getBottom() - 110 - padding;
     virtualPiano.setBounds(padding, pianoY, bounds.getWidth() - padding * 2, 110);
 
+    int staffY = padding;
+    if (isRoutineMode)
+    {
+        dailyRoutine.setBounds(padding, padding, bounds.getWidth() - padding * 2, 98);
+        staffY = dailyRoutine.getBottom() + padding;
+    }
+    else
+    {
+        scoreboard.setBounds(padding, padding, bounds.getWidth() - padding * 2, 72);
+        staffY = scoreboard.getBottom() + padding;
+    }
+
     // Middle: Grand Staff Notation
-    const int staffY = scoreboard.getBottom() + padding;
     const int staffHeight = pianoY - staffY - padding;
     grandStaff.setBounds(padding, staffY, bounds.getWidth() - padding * 2, staffHeight);
 
@@ -140,6 +210,16 @@ void MidiSheetAudioProcessorEditor::paint(juce::Graphics& g)
 
 void MidiSheetAudioProcessorEditor::timerCallback()
 {
+    const double nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const bool isStandalone = (audioProcessor.wrapperType == juce::AudioProcessor::wrapperType_Standalone);
+    if (isStandalone || audioProcessor.getScorer().isSilentAnalyzing())
+    {
+        if ((nowSec - audioProcessor.getLastProcessBlockTimeSec()) > 0.100)
+        {
+            audioProcessor.getScorer().processTime(-1.0, nowSec);
+        }
+    }
+
     // Drain all incoming MIDI events from the lock-free FIFO queue
     auto& queue = audioProcessor.getMidiQueue();
     MidiEvent ev;
@@ -156,11 +236,50 @@ void MidiSheetAudioProcessorEditor::timerCallback()
     const auto chord = MusicTheory::detectChord(activeMidiNotes, preferFlats);
 
     const auto& scorer = audioProcessor.getScorer();
-    grandStaff.setPracticeMelody(&scorer.getCurrentMelody(),
-                                 scorer.getCurrentNoteIndex(),
-                                 scorer.isFinished());
+    grandStaff.setPracticeState(&scorer.getCurrentMelody(),
+                                scorer.getCurrentNoteIndex(),
+                                scorer.isFinished(),
+                                scorer.getPracticeMode(),
+                                scorer.getCurrentPlayheadBeats(),
+                                scorer.getIsCountingIn(),
+                                scorer.isSilentAnalyzing(),
+                                scorer.getAnalysisSecondsRemaining(),
+                                scorer.getCountInBeat(),
+                                scorer.getCountInTotal());
     grandStaff.setNoteEvaluations(&scorer.getNoteEvaluations());
     scoreboard.updateState(scorer, chord, transport.bpm, transport.isPlaying, activeMidiNotes, preferFlats, grandStaff.getActiveReviewMistakeIndex());
+
+    // Record FirstRead result if just completed
+    if (scorer.isFinished() && scorer.getPracticeMode() == PracticeMode::FirstRead)
+    {
+        const auto& mId = scorer.getCurrentMelody().id;
+        if (!audioProcessor.isMelodyFirstReadLocked(mId))
+        {
+            FirstReadRecord rec;
+            rec.melodyId = mId;
+            rec.title = scorer.getCurrentMelody().title;
+            rec.timestamp = juce::Time::getCurrentTime().toMilliseconds();
+            rec.dateStr = juce::Time::getCurrentTime().formatted("%Y-%m-%d %H:%M");
+            rec.pitchAccuracy = scorer.getScorecard().pitchAccuracy;
+            rec.rhythmAccuracy = scorer.getScorecard().rhythmAccuracy;
+            rec.sightReadingScore = scorer.getScorecard().sightReadingScore;
+            rec.recoveries = scorer.getScorecard().recoveries;
+            rec.bpm = scorer.getBpm();
+            audioProcessor.recordFirstReadResult(rec);
+        }
+    }
+
+    if (audioProcessor.isRoutineMode())
+    {
+        audioProcessor.getRoutineManager().advanceTime(0.033);
+        dailyRoutine.updateUI();
+
+        if (scorer.isFinished())
+        {
+            audioProcessor.getRoutineManager().onMelodyCompleted(scorer.getScorecard());
+        }
+    }
+
     grandStaff.repaint();
 
     if (hasEvents)
@@ -194,12 +313,25 @@ void MidiSheetAudioProcessorEditor::handleMidiEvent(const MidiEvent& ev)
 
         const bool hit = scorer.evaluateNote(midi, ev.velocity, noteTimestamp, hostPpq);
 
-        grandStaff.setPracticeMelody(&scorer.getCurrentMelody(),
-                                     scorer.getCurrentNoteIndex(),
-                                     scorer.isFinished());
+        grandStaff.setPracticeState(&scorer.getCurrentMelody(),
+                                    scorer.getCurrentNoteIndex(),
+                                    scorer.isFinished(),
+                                    scorer.getPracticeMode(),
+                                    scorer.getCurrentPlayheadBeats(),
+                                    scorer.getIsCountingIn(),
+                                    scorer.isSilentAnalyzing(),
+                                    scorer.getAnalysisSecondsRemaining());
         if (!hit)
         {
             grandStaff.triggerMistakeFlash();
+        }
+
+        // Check if downbeat tempo recovery occurred
+        const auto& evals = scorer.getNoteEvaluations();
+        const int prevIdx = scorer.getCurrentNoteIndex() - 1;
+        if (prevIdx >= 0 && prevIdx < static_cast<int>(evals.size()) && evals[static_cast<size_t>(prevIdx)].isRecovered)
+        {
+            grandStaff.triggerRecoveryFlash();
         }
 
         if (auto* target = scorer.getCurrentTargetNote())

@@ -25,3 +25,8 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# IDE / Editor
+*.code-workspace
+.vscode/
+

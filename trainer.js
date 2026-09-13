@@ -14,7 +14,7 @@ export class MelodyTrainer {
     this.currentMelody = null;
     this.noteIndex = 0;
     this.isFinished = false;
-    this.mode = 'wait'; // 'wait' (wait-for-note) or 'tempo' (strict timing)
+    this.mode = 'wait'; // 'wait' (wait-for-note), 'tempo', 'strict' (no-pause sight-reading), 'first_read'
     this.bpm = 108;
     this.metronomeEnabled = true;
 
@@ -30,6 +30,21 @@ export class MelodyTrainer {
     this.currentBeatIndex = 0;
     this.lastBeatTime = 0;
     this.noteTimeline = [];
+    this.playheadBeats = 0;
+
+    // Strict Sight-Reading & Downbeat Recovery State
+    this.previousNoteMissedOrMistake = false;
+
+    // Latency Calibration & Hardware Offset Compensation
+    this.latencyCompensationMs = this.loadLatencyCompensation();
+    this.lastRawOffsetMs = null;
+
+    // First-Read Challenge & Silent Analysis State
+    this.isAnalyzing = false;
+    this.analysisSecondsRemaining = 30;
+    this.analysisTotalSeconds = 30;
+    this.analysisTimer = null;
+    this.firstReadRecords = this.loadFirstReadRecords();
 
     // Per-note result array: each entry tracks status ('pending'|'correct'|'mistake'|'missed')
     this.noteResults = [];
@@ -47,10 +62,13 @@ export class MelodyTrainer {
       correctNotes: 0,
       mistakeCount: 0,
       missedNotes: 0,
+      recoveries: 0,
+      recoveryPoints: 0,
       streak: 0,
       bestStreak: 0,
       accuracy: 100, // Pitch accuracy %
       rhythmAccuracy: 100, // Rhythm accuracy %
+      sightReadingScore: 100, // Weighted (60% rhythm + 40% pitch + recovery)
       perfectHits: 0, // <= 75ms
       earlyHits: 0,   // -160ms to -75ms
       lateHits: 0,    // +75ms to +160ms
@@ -68,10 +86,139 @@ export class MelodyTrainer {
     this.onTimingFeedback = null;
     this.onMetronomeTick = null;
     this.onCountIn = null;
+    this.onAnalysisTick = null;
+    this.onAnalysisComplete = null;
+    this.onRecovery = null;
+    this.onPlayheadMove = null;
+    this.onFirstReadLocked = null;
     this.onComplete = null;
 
     // Load default melody
     this.loadMelody(this.melodies[0].id);
+  }
+
+  isStrictTimeMode() {
+    return this.mode === 'strict' || this.mode === 'first_read';
+  }
+
+  isTimeDrivenMode() {
+    return this.mode === 'tempo' || this.mode === 'strict' || this.mode === 'first_read';
+  }
+
+  isFirstReadMode() {
+    return this.mode === 'first_read';
+  }
+
+  loadFirstReadRecords() {
+    try {
+      const data = localStorage.getItem('midisheet_first_read_records');
+      return data ? JSON.parse(data) : {};
+    } catch (e) {
+      console.warn('Failed to load first-read records:', e);
+      return {};
+    }
+  }
+
+  saveFirstReadRecord(melodyId, record) {
+    try {
+      this.firstReadRecords = this.loadFirstReadRecords();
+      this.firstReadRecords[melodyId] = record;
+      localStorage.setItem('midisheet_first_read_records', JSON.stringify(this.firstReadRecords));
+      return true;
+    } catch (e) {
+      console.warn('Failed to save first-read record:', e);
+      return false;
+    }
+  }
+
+  getFirstReadRecord(melodyId) {
+    if (!melodyId) return null;
+    this.firstReadRecords = this.loadFirstReadRecords();
+    return this.firstReadRecords[melodyId] || null;
+  }
+
+  isMelodyFirstReadLocked(melodyId) {
+    return !!this.getFirstReadRecord(melodyId);
+  }
+
+  resetFirstReadRecords() {
+    try {
+      localStorage.removeItem('midisheet_first_read_records');
+      this.firstReadRecords = {};
+      this.notifyState();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  loadLatencyCompensation() {
+    try {
+      const saved = localStorage.getItem('midisheet_latency_compensation_ms');
+      if (saved !== null) {
+        const val = parseInt(saved, 10);
+        return isNaN(val) ? 0 : Math.max(-500, Math.min(500, val));
+      }
+    } catch (e) {
+      console.warn('Failed to load latency compensation:', e);
+    }
+    return 0;
+  }
+
+  setLatencyCompensation(ms) {
+    const val = Math.max(-500, Math.min(500, Math.round(Number(ms) || 0)));
+    this.latencyCompensationMs = val;
+    try {
+      localStorage.setItem('midisheet_latency_compensation_ms', val.toString());
+    } catch (e) {
+      console.warn('Failed to save latency compensation:', e);
+    }
+    return val;
+  }
+
+  startSilentAnalysis(durationSeconds = 30) {
+    this.stopMetronome();
+    if (this.analysisTimer) {
+      clearInterval(this.analysisTimer);
+      this.analysisTimer = null;
+    }
+
+    this.isAnalyzing = true;
+    this.analysisSecondsRemaining = durationSeconds;
+    this.analysisTotalSeconds = durationSeconds;
+    this.notifyState();
+
+    if (this.onAnalysisTick) {
+      this.onAnalysisTick(this.analysisSecondsRemaining, this.analysisTotalSeconds);
+    }
+
+    this.analysisTimer = setInterval(() => {
+      this.analysisSecondsRemaining--;
+      if (this.onAnalysisTick) {
+        this.onAnalysisTick(this.analysisSecondsRemaining, this.analysisTotalSeconds);
+      }
+      this.notifyState();
+
+      if (this.analysisSecondsRemaining <= 0) {
+        this.skipSilentAnalysis();
+      }
+    }, 1000);
+  }
+
+  skipSilentAnalysis() {
+    if (this.analysisTimer) {
+      clearInterval(this.analysisTimer);
+      this.analysisTimer = null;
+    }
+    this.isAnalyzing = false;
+    this.notifyState();
+
+    if (this.onAnalysisComplete) {
+      this.onAnalysisComplete();
+    }
+
+    // Launch strict count-in and playback!
+    this.startMetronome();
   }
 
   addCustomMelody(melody) {
@@ -141,6 +288,14 @@ export class MelodyTrainer {
     this.restart();
   }
 
+  loadMelodyObject(melodyObj) {
+    if (!melodyObj) return;
+    this.currentMelody = melodyObj;
+    this.bpm = melodyObj.bpm || 108;
+    this.buildNoteTimeline();
+    this.restart();
+  }
+
   buildNoteTimeline() {
     if (!this.currentMelody) return;
     let cumulativeBeats = 0;
@@ -173,6 +328,8 @@ export class MelodyTrainer {
     this.songStartTime = null;
     this.lastNoteTimestampMs = null;
     this.expectedCumulativeBeats = 0;
+    this.playheadBeats = 0;
+    this.previousNoteMissedOrMistake = false;
 
     this.noteResults = this.currentMelody.notes.map(() => ({
       status: 'pending',
@@ -188,10 +345,13 @@ export class MelodyTrainer {
       correctNotes: 0,
       mistakeCount: 0,
       missedNotes: 0,
+      recoveries: 0,
+      recoveryPoints: 0,
       streak: 0,
       bestStreak: 0,
       accuracy: 100,
       rhythmAccuracy: 100,
+      sightReadingScore: 100,
       perfectHits: 0,
       earlyHits: 0,
       lateHits: 0,
@@ -211,8 +371,16 @@ export class MelodyTrainer {
     this.buildNoteTimeline();
     this.notifyState();
 
-    // Start metronome / countdown if enabled or in tempo mode
-    if (this.mode === 'tempo' || this.metronomeEnabled) {
+    // In first_read mode, start silent analysis or notify if locked
+    if (this.mode === 'first_read') {
+      if (this.isMelodyFirstReadLocked(this.currentMelody.id)) {
+        if (this.onFirstReadLocked) {
+          this.onFirstReadLocked(this.getFirstReadRecord(this.currentMelody.id));
+        }
+      } else {
+        this.startSilentAnalysis(30);
+      }
+    } else if (this.isTimeDrivenMode() || this.metronomeEnabled) {
       this.startMetronome();
     }
   }
@@ -226,7 +394,7 @@ export class MelodyTrainer {
     const clamped = Math.max(40, Math.min(240, Math.round(bpm)));
     if (this.bpm === clamped) return;
     this.bpm = clamped;
-    if (this.metronomeTimer || this.mode === 'tempo') {
+    if (this.metronomeTimer || this.isTimeDrivenMode()) {
       this.restart();
     } else {
       this.notifyState();
@@ -245,6 +413,12 @@ export class MelodyTrainer {
   }
 
   stopMetronome() {
+    if (this.analysisTimer) {
+      clearInterval(this.analysisTimer);
+      this.analysisTimer = null;
+    }
+    this.isAnalyzing = false;
+
     if (this.metronomeTimer) {
       clearTimeout(this.metronomeTimer);
       this.metronomeTimer = null;
@@ -261,12 +435,12 @@ export class MelodyTrainer {
 
     const timeSig = this.currentMelody.timeSignature || [4, 4];
     const beatsPerMeasure = timeSig[0] || 4;
-    this.countInTotal = beatsPerMeasure;
+    this.countInTotal = 4; // Standard 4-beat sight-reading count-in
     this.currentBeatIndex = 0;
 
     const beatMs = (60 / this.bpm) * 1000;
 
-    if (this.mode === 'tempo') {
+    if (this.isTimeDrivenMode()) {
       this.isCountingIn = true;
       this.countInBeat = 1;
       this.songStartTime = null;
@@ -286,28 +460,41 @@ export class MelodyTrainer {
       const now = performance.now();
       this.lastBeatTime = now;
 
-      if (this.mode === 'tempo' && this.isCountingIn) {
-        const isDownbeat = (this.countInBeat === 1);
-        if (this.onMetronomeTick && this.metronomeEnabled) {
-          this.onMetronomeTick(this.countInBeat - 1, isDownbeat, {
-            isCountIn: true,
-            count: this.countInBeat,
-            total: this.countInTotal
-          });
-        }
-        if (this.onCountIn) {
-          this.onCountIn(this.countInBeat, this.countInTotal);
-        }
-
-        this.countInBeat++;
-        if (this.countInBeat > this.countInTotal) {
-          // Count in complete! Song starts on next interval
-          this.isCountingIn = false;
-          this.songStartTime = nextTickTime + beatMs;
-          this.currentBeatIndex = 0;
-          if (this.onCountIn) {
-            this.onCountIn(0, this.countInTotal); // Dismiss count-in
+      if (this.isTimeDrivenMode() && this.isCountingIn) {
+        if (this.countInBeat <= this.countInTotal) {
+          // Play count-in click and show number on banner
+          const isDownbeat = (this.countInBeat === 1);
+          if (this.onMetronomeTick && this.metronomeEnabled) {
+            this.onMetronomeTick(this.countInBeat - 1, isDownbeat, {
+              isCountIn: true,
+              count: this.countInBeat,
+              total: this.countInTotal
+            });
           }
+          if (this.onCountIn) {
+            this.onCountIn(this.countInBeat, this.countInTotal);
+          }
+          this.countInBeat++;
+        } else {
+          // Count in complete! This exact tick IS Beat 1 of Measure 1!
+          this.isCountingIn = false;
+          this.songStartTime = now;
+          this.currentBeatIndex = 0;
+          this.playheadBeats = 0;
+          if (this.onCountIn) {
+            this.onCountIn(0, this.countInTotal); // Dismiss count-in banner cleanly at downbeat
+          }
+
+          // Trigger Beat 1 of Measure 1 click immediately
+          const isDownbeat = true;
+          if (this.onMetronomeTick && this.metronomeEnabled) {
+            this.onMetronomeTick(0, isDownbeat, {
+              isCountIn: false,
+              beat: 1,
+              total: beatsPerMeasure
+            });
+          }
+          this.currentBeatIndex = 1;
         }
       } else {
         const beatInMeasure = (this.currentBeatIndex % beatsPerMeasure);
@@ -332,7 +519,7 @@ export class MelodyTrainer {
     // First tick immediately
     tick();
 
-    if (this.mode === 'tempo') {
+    if (this.isTimeDrivenMode()) {
       this.startTempoMonitor();
     }
   }
@@ -341,7 +528,7 @@ export class MelodyTrainer {
    * Re-align metronome to user's first note strike in Wait mode
    */
   alignMetronomeTo(anchorTime) {
-    if (!this.metronomeEnabled || this.mode === 'tempo') return;
+    if (!this.metronomeEnabled || this.isTimeDrivenMode()) return;
     this.stopMetronome();
 
     const timeSig = this.currentMelody ? (this.currentMelody.timeSignature || [4, 4]) : [4, 4];
@@ -383,50 +570,74 @@ export class MelodyTrainer {
   }
 
   /**
-   * Monitor note progress in Tempo mode.
-   * If note window has passed without being hit, auto-advance and record as missed.
+   * Monitor note progress in In-Tempo and Strict Sight-Reading modes.
+   * Advances the relentless playhead and auto-records expired notes as missed.
    */
   startTempoMonitor() {
     const beatMs = (60 / this.bpm) * 1000;
 
     const monitor = () => {
-      if (this.isFinished || this.mode !== 'tempo') return;
+      if (this.isFinished || !this.isTimeDrivenMode()) return;
 
-      if (!this.isCountingIn && this.songStartTime !== null && this.noteIndex < this.currentMelody.notes.length) {
+      if (!this.isCountingIn && !this.isAnalyzing && this.songStartTime !== null) {
         const now = performance.now();
-        const currentTarget = this.noteTimeline[this.noteIndex];
-        if (currentTarget) {
-          const noteExpectedTime = this.songStartTime + (currentTarget.startBeat * beatMs);
+        // Shift playhead so it visually represents what is currently audible from speakers
+        const elapsedMs = Math.max(0, (now - this.latencyCompensationMs) - this.songStartTime);
+        this.playheadBeats = elapsedMs / beatMs;
+
+        if (this.onPlayheadMove) {
+          this.onPlayheadMove(this.playheadBeats);
+        }
+
+        // Keep active target note synchronized directly with current playhead beats
+        let advanced = false;
+        while (this.noteIndex < this.currentMelody.notes.length) {
+          const currentTarget = this.noteTimeline[this.noteIndex];
+          if (!currentTarget) break;
+
+          // Note physically sounds in ears at scheduled beat + latency compensation
+          const noteExpectedTime = this.songStartTime + (currentTarget.startBeat * beatMs) + this.latencyCompensationMs;
           const noteDurationMs = currentTarget.duration * beatMs;
-          // Note expires when playback moves past the note duration plus an expiration grace window
-          const noteExpiryTime = noteExpectedTime + Math.max(noteDurationMs, 280);
+          // Tight musical grace window: max 140ms so target never lags behind current rhythm
+          const graceMs = Math.min(140, noteDurationMs * 0.35);
+          const noteExpiryTime = noteExpectedTime + noteDurationMs + graceMs;
 
           if (now > noteExpiryTime) {
-            // Note was not played in time -> Auto-advance as Missed
+            // Note expired without being struck -> Auto-advance as Missed
             const currentSlot = this.noteResults[this.noteIndex];
-            currentSlot.status = 'missed';
-            currentSlot.timing = { rating: 'missed', offsetMs: null, text: 'Missed' };
+            if (currentSlot && currentSlot.status === 'pending') {
+              currentSlot.status = 'missed';
+              currentSlot.timing = { rating: 'missed', offsetMs: null, text: 'Missed' };
 
-            this.stats.missedNotes++;
-            this.stats.offBeatHits++;
-            this.stats.streak = 0;
-            this.calculateAccuracy();
+              this.stats.missedNotes++;
+              this.stats.offBeatHits++;
+              this.stats.streak = 0;
+              this.previousNoteMissedOrMistake = true;
+              this.calculateAccuracy();
 
-            if (this.onTimingFeedback) {
-              this.onTimingFeedback({
-                rating: 'missed',
-                offsetMs: null,
-                text: '🔴 Missed'
-              });
+              if (this.onTimingFeedback) {
+                this.onTimingFeedback({
+                  rating: 'missed',
+                  offsetMs: null,
+                  text: '🔴 Missed'
+                });
+              }
             }
 
             this.noteIndex++;
-            if (this.noteIndex >= this.currentMelody.notes.length) {
-              this.finishMelody();
-              return;
-            } else {
-              this.notifyState();
-            }
+            advanced = true;
+          } else {
+            // Target is currently active
+            break;
+          }
+        }
+
+        if (advanced) {
+          if (this.noteIndex >= this.currentMelody.notes.length) {
+            this.finishMelody();
+            return;
+          } else {
+            this.notifyState();
           }
         }
       }
@@ -444,7 +655,7 @@ export class MelodyTrainer {
 
   /**
    * Evaluate timing accuracy for a played note
-   * Direct parity with VST3 C++ MelodyScorer.cpp
+   * Direct parity with VST3 C++ MelodyScorer.cpp with Audio Latency Offset Compensation
    */
   evaluateTiming(now) {
     const beatMs = (60 / this.bpm) * 1000;
@@ -454,14 +665,14 @@ export class MelodyTrainer {
     const target = this.getCurrentTargetNote();
     const targetDuration = target ? (target.duration || 1) : 1;
 
-    // Note 0 initiates phrase/song timing (exact VST3 MelodyScorer parity)
-    if (this.noteIndex === 0) {
+    // In Wait mode, Note 0 initiates phrase/song timing (exact VST3 MelodyScorer parity)
+    if (this.mode === 'wait' && this.noteIndex === 0) {
       this.songStartTime = now;
       this.lastNoteTimestampMs = now;
       this.expectedCumulativeBeats = targetDuration;
 
       // In Wait mode, re-align metronome to Note 0 downbeat if metronome is active
-      if (this.mode === 'wait' && this.metronomeEnabled) {
+      if (this.metronomeEnabled) {
         this.alignMetronomeTo(now);
       }
 
@@ -470,20 +681,23 @@ export class MelodyTrainer {
       text = '🟢 Perfect (Start)';
       this.stats.perfectHits++;
       this.stats.rhythmPoints += points;
-      return { rating, offsetMs: 0, text, points };
+      return { rating, offsetMs: 0, rawOffsetMs: 0, text, points };
     }
 
-    if (this.mode === 'tempo') {
-      // In Tempo mode: lock to timeline anchored to songStartTime
-      if (this.songStartTime !== null) {
-        const currentTarget = this.noteTimeline[this.noteIndex];
-        const expectedTime = currentTarget
-          ? (this.songStartTime + (currentTarget.startBeat * beatMs))
-          : (this.songStartTime + (this.expectedCumulativeBeats * beatMs));
-        delta = now - expectedTime;
-      } else {
-        delta = 0;
+    if (this.isTimeDrivenMode()) {
+      // In Tempo and Strict modes: lock to timeline anchored to songStartTime
+      if (this.songStartTime === null) {
+        this.songStartTime = now;
       }
+      const currentTarget = this.noteTimeline[this.noteIndex];
+      const expectedTime = currentTarget
+        ? (this.songStartTime + (currentTarget.startBeat * beatMs))
+        : (this.songStartTime + (this.expectedCumulativeBeats * beatMs));
+      
+      const rawDelta = now - expectedTime;
+      this.lastRawOffsetMs = Math.round(rawDelta);
+      delta = rawDelta - this.latencyCompensationMs;
+
       this.lastNoteTimestampMs = now;
       this.expectedCumulativeBeats += targetDuration;
     } else {
@@ -496,8 +710,10 @@ export class MelodyTrainer {
       if (this.lastNoteTimestampMs !== null && this.lastNoteTimestampMs > 0) {
         const actualIntervalMs = now - this.lastNoteTimestampMs;
         delta = actualIntervalMs - expectedIntervalMs;
+        this.lastRawOffsetMs = Math.round(delta);
       } else {
         delta = 0;
+        this.lastRawOffsetMs = 0;
       }
 
       this.lastNoteTimestampMs = now;
@@ -531,7 +747,7 @@ export class MelodyTrainer {
     }
 
     this.stats.rhythmPoints += points;
-    return { rating, offsetMs: Math.round(delta), text, points };
+    return { rating, offsetMs: Math.round(delta), rawOffsetMs: this.lastRawOffsetMs, text, points };
   }
 
   /**
@@ -540,8 +756,15 @@ export class MelodyTrainer {
   onNotePlayed(midi, velocity = 100) {
     if (this.isFinished || !this.currentMelody) return;
 
-    // If counting in tempo mode, ignore or notify to wait
-    if (this.mode === 'tempo' && this.isCountingIn) {
+    if (this.isAnalyzing) {
+      if (this.onTimingFeedback) {
+        this.onTimingFeedback({ rating: 'analyzing', offsetMs: null, text: '👀 Silent Analysis Phase' });
+      }
+      return;
+    }
+
+    // If counting in tempo or strict mode, ignore or notify to wait
+    if (this.isTimeDrivenMode() && this.isCountingIn) {
       if (this.onTimingFeedback) {
         this.onTimingFeedback({ rating: 'count_in', offsetMs: null, text: '⏳ Wait for Count-In!' });
       }
@@ -571,6 +794,7 @@ export class MelodyTrainer {
     this.heldNotes.add(midi);
 
     const expectedMidi = targetNote.midi;
+    const isTimeDriven = this.isTimeDrivenMode();
 
     if (midi === expectedMidi) {
       // Correct pitch struck!
@@ -579,6 +803,33 @@ export class MelodyTrainer {
 
       // Evaluate beat timing
       const timing = this.evaluateTiming(now);
+
+      // Downbeat Recovery Bonus Check
+      const timeSig = this.currentMelody.timeSignature || [4, 4];
+      const beatsPerMeasure = timeSig[0] || 4;
+      const isMeasureDownbeat = (targetNote.startBeat % beatsPerMeasure === 0);
+      const isGoodTiming = (timing.rating === 'perfect' || timing.rating === 'early' || timing.rating === 'late');
+
+      if (this.previousNoteMissedOrMistake && isGoodTiming && isMeasureDownbeat) {
+        // Award Tempo Recovery Bonus!
+        const bonus = 35;
+        this.stats.recoveries = (this.stats.recoveries || 0) + 1;
+        this.stats.recoveryPoints = (this.stats.recoveryPoints || 0) + bonus;
+        timing.recovered = true;
+        timing.text = `⚡ Recovery! +Bonus (${timing.offsetMs >= 0 ? '+' : ''}${timing.offsetMs}ms)`;
+
+        if (this.onRecovery) {
+          this.onRecovery({
+            index: this.noteIndex,
+            targetNote,
+            recoveries: this.stats.recoveries,
+            bonusPoints: bonus
+          });
+        }
+        this.previousNoteMissedOrMistake = false;
+      } else if (isGoodTiming) {
+        this.previousNoteMissedOrMistake = false;
+      }
 
       currentSlot.status = 'correct';
       currentSlot.playedMidi = midi;
@@ -619,17 +870,60 @@ export class MelodyTrainer {
 
       this.stats.mistakeCount++;
       this.stats.streak = 0;
-
-      this.calculateAccuracy();
+      this.previousNoteMissedOrMistake = true;
 
       const expectedInfo = MusicTheory.getNoteInfo(expectedMidi);
       const playedInfo = MusicTheory.getNoteInfo(midi);
 
-      if (this.onNoteMistake) {
-        this.onNoteMistake(this.noteIndex, expectedInfo, playedInfo);
-      }
+      if (isTimeDriven) {
+        // IN TIME-DRIVEN (IN-TEMPO / STRICT / FIRST-READ) MODES:
+        // Evaluate rhythmic timeliness so user is scored for keeping time!
+        const timing = this.evaluateTiming(now);
+        currentSlot.timing = timing;
 
-      this.notifyState();
+        const rhythmText = timing.rating === 'perfect' ? '🟢 Great Rhythm!' :
+                           (timing.rating === 'early' || timing.rating === 'late') ? `🟡 In Tempo (${timing.offsetMs}ms)` : '🔴 Off-beat';
+
+        if (this.onTimingFeedback) {
+          this.onTimingFeedback({
+            rating: timing.rating,
+            offsetMs: timing.offsetMs,
+            text: `❌ ${playedInfo.fullName} • ${rhythmText}`
+          });
+        }
+
+        if (this.onNoteMistake) {
+          this.onNoteMistake(this.noteIndex, expectedInfo, playedInfo, timing);
+        }
+
+        this.calculateAccuracy();
+        this.lastCompletedTime = now;
+
+        // Advance to next note slot immediately (No-Pause Metronome: never wait for pitch fix!)
+        this.noteIndex++;
+        if (this.noteIndex >= this.currentMelody.notes.length) {
+          this.finishMelody();
+        } else {
+          this.notifyState();
+        }
+      } else {
+        // Traditional Wait mode: wait for correction
+        this.calculateAccuracy();
+
+        if (this.onTimingFeedback) {
+          this.onTimingFeedback({
+            rating: 'mistake',
+            offsetMs: null,
+            text: `❌ Played ${playedInfo.fullName} (Expected ${expectedInfo.fullName})`
+          });
+        }
+
+        if (this.onNoteMistake) {
+          this.onNoteMistake(this.noteIndex, expectedInfo, playedInfo);
+        }
+
+        this.notifyState();
+      }
     }
   }
 
@@ -651,12 +945,20 @@ export class MelodyTrainer {
     }
 
     // Rhythm Accuracy: points earned vs max possible points for processed notes
-    const processedNotes = this.stats.correctNotes + this.stats.missedNotes;
+    const processedNotes = this.stats.correctNotes + this.stats.missedNotes + (this.isTimeDrivenMode() ? this.stats.mistakeCount : 0);
     if (processedNotes === 0) {
       this.stats.rhythmAccuracy = 100;
     } else {
       const maxPossibleRhythm = processedNotes * 100;
-      this.stats.rhythmAccuracy = Math.max(0, Math.min(100, Math.round((this.stats.rhythmPoints / maxPossibleRhythm) * 100)));
+      const totalRhythmWithBonus = this.stats.rhythmPoints + (this.stats.recoveryPoints || 0);
+      this.stats.rhythmAccuracy = Math.max(0, Math.min(100, Math.round((totalRhythmWithBonus / maxPossibleRhythm) * 100)));
+    }
+
+    // Composite Sight-Reading Score (Rhythm timeliness first, Pitch second)
+    if (this.isTimeDrivenMode()) {
+      this.stats.sightReadingScore = Math.max(0, Math.min(100, Math.round(
+        (this.stats.rhythmAccuracy * 0.60) + (this.stats.accuracy * 0.40)
+      )));
     }
   }
 
@@ -666,7 +968,7 @@ export class MelodyTrainer {
     this.stats.endTime = performance.now();
     this.calculateAccuracy();
 
-    const durationSeconds = Math.round((this.stats.endTime - this.stats.startTime) / 1000);
+    const durationSeconds = Math.max(1, Math.round((this.stats.endTime - this.stats.startTime) / 1000));
 
     // Calculate stars factoring pitch accuracy and rhythm accuracy (VST3 MelodyScorer parity)
     let stars = 1;
@@ -682,6 +984,8 @@ export class MelodyTrainer {
       melody: this.currentMelody,
       accuracy: this.stats.accuracy,
       rhythmAccuracy: this.stats.rhythmAccuracy,
+      sightReadingScore: this.stats.sightReadingScore || Math.round((this.stats.rhythmAccuracy * 0.60) + (this.stats.accuracy * 0.40)),
+      recoveries: this.stats.recoveries || 0,
       perfectHits: this.stats.perfectHits,
       greatHits: this.stats.earlyHits + this.stats.lateHits,
       goodHits: this.stats.goodHits,
@@ -696,6 +1000,27 @@ export class MelodyTrainer {
       bpm: this.bpm,
       stars
     };
+
+    if (this.mode === 'first_read') {
+      const record = {
+        melodyId: this.currentMelody.id,
+        title: this.currentMelody.title,
+        composer: this.currentMelody.composer,
+        difficulty: this.currentMelody.difficulty,
+        timestamp: Date.now(),
+        dateStr: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+        pitchAccuracy: this.stats.accuracy,
+        rhythmAccuracy: this.stats.rhythmAccuracy,
+        sightReadingScore: summary.sightReadingScore,
+        recoveries: this.stats.recoveries || 0,
+        stars,
+        durationSeconds,
+        bpm: this.bpm
+      };
+      this.saveFirstReadRecord(this.currentMelody.id, record);
+      summary.isFirstRead = true;
+      summary.firstReadRecord = record;
+    }
 
     this.notifyState();
 
@@ -757,6 +1082,14 @@ export class MelodyTrainer {
         isCountingIn: this.isCountingIn,
         countInBeat: this.countInBeat,
         countInTotal: this.countInTotal,
+        playheadBeats: this.playheadBeats,
+        isAnalyzing: this.isAnalyzing,
+        analysisSecondsRemaining: this.analysisSecondsRemaining,
+        analysisTotalSeconds: this.analysisTotalSeconds,
+        recoveries: this.stats.recoveries || 0,
+        sightReadingScore: this.stats.sightReadingScore,
+        isFirstReadLocked: this.isMelodyFirstReadLocked(this.currentMelody?.id),
+        firstReadRecord: this.getFirstReadRecord(this.currentMelody?.id),
         mistakeIndices: this.getMistakeIndices()
       });
     }

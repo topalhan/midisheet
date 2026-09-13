@@ -12,6 +12,13 @@ struct MelodyNote
     int midi = 60;
     float duration = 1.0f; // Duration in beats (quarter notes)
     juce::String name = "C4";
+    double startBeat = 0.0;
+};
+
+struct TimeSignature
+{
+    int numerator = 4;
+    int denominator = 4;
 };
 
 struct Melody
@@ -23,6 +30,7 @@ struct Melody
     int bpm = 120;
     int timeSigNum = 4;
     int timeSigDen = 4;
+    TimeSignature timeSignature { 4, 4 };
     juce::String key;
     juce::String description;
     std::vector<MelodyNote> notes;

@@ -6,6 +6,7 @@
 #include "ui/ScoreboardComponent.h"
 #include "ui/MelodySelectorComponent.h"
 #include "ui/VirtualPianoComponent.h"
+#include "ui/DailyRoutineComponent.h"
 #include "core/MusicTheory.h"
 #include <vector>
 
@@ -31,10 +32,12 @@ private:
 
     GrandStaffComponent grandStaff;
     ScoreboardComponent scoreboard;
+    DailyRoutineComponent dailyRoutine;
     VirtualPianoComponent virtualPiano;
     MelodySelectorComponent melodySelector;
 
     bool isMelodySelectorOpen = false;
+    bool isRoutineMode = false;
     bool preferFlats = false;
     std::vector<int> activeMidiNotes;
 

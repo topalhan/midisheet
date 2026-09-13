@@ -27,9 +27,20 @@ A modern, zero-dependency web application that accepts Web MIDI hardware input (
   - **Inter-Onset Rhythm Evaluation**: Natural musical rhythm assessment in Wait mode (matching C++ `MelodyScorer.cpp`) with phrase anchoring on Note 0 and metronome grid sync.
   - **Classical Note Engraving**: Vector augmentation dots with automatic staff-line collision avoidance and curved Bezier eighth/sixteenth note flags.
   - **"🔇 No Sound (Hardware / EWI Audio)" Preset**: Built-in option to mute the internal synth for players using hardware sound generators (e.g. EWI5000, Yamaha YDS, digital pianos) while maintaining full visual notation and scoring.
-  - **Two Practice Modes**:
+  - **Practice Modes**:
     - *Wait for Note (Learn Mode)*: Pauses until the correct note is played before advancing.
     - *In-Tempo (Challenge Mode)*: Evaluates performance rhythm and speed against an ongoing timeline.
+    - *Strict Time (No-Pause Metronome)*: Relentless playhead advancing strictly by time; wrong notes do not halt playback; features downbeat tempo recovery bonuses.
+    - *First-Read Challenge*: 30s silent inspection phase followed by a 4-beat count-in and a single-shot strict evaluation with permanent lockout.
+  - **20-Minute Master Class Daily Sight-Reading Routine**:
+    - Structured 4-Block daily curriculum:
+      - **Block 1: Mechanical Calibration (5 min)**: Awkward interval pairs (60 BPM) & Klosé Broken Thirds.
+      - **Block 2: Pre-Flight Analysis (5 min)**: Paul Harris interactive rhythm tapping & silent visual interval audit.
+      - **Block 3: The Cold Sight-Read (7 min)**: Strict Take 1 (no pauses), Targeted Fix looping, and Take 2 with lookahead masking.
+      - **Block 4: Volume Flash Reading (3 min)**: 3 excerpt lines with 10-second flash scan & single-play lockout.
+    - Multi-key transposition support (C, G, F, D, Bb Major; A, D Minor).
+    - Daily completion streaks, progress calendar, and aggregated performance statistics.
+    - Full C++20 / JUCE 8 parity in VST3 and Standalone plugin.
   - **Performance Scorecard**: Awards 1, 2, or 3 glowing stars with detailed feedback at the end of each melody.
 - **Real-Time Grand Staff Notation**:
   - Crisp vector Treble Clef and Bass Clef rendering on an HTML5 canvas with HiDPI/Retina support.
@@ -105,8 +116,14 @@ n:/projects/learning/
 ├── style.css        # CSS variables, dark/light theme, realistic piano keys & staff styles
 ├── chords.js        # Music theory engine, diatonic step mapping, and chord identification
 ├── notation.js      # Canvas Grand Staff renderer (Treble, Bass, Ledger lines, Scrolling notes)
-├── audio.js         # Polyphonic Web Audio synthesizer with 4 instrument presets
+├── audio.js         # Polyphonic Web Audio synthesizer with instrument presets
 ├── midi.js          # Web MIDI API manager, hotplugging, and QWERTY keyboard bridge
-├── app.js           # Coordinator linking Audio, MIDI, Notation, and Virtual Keyboard
+├── midiparser.js    # External Standard MIDI File (SMF) type 0/1 parser
+├── trainer.js       # Melody practice engine, real-time timing scorer, and mistake inspector
+├── routine.js       # Daily 20-minute sight-reading routine controller (4-block curriculum)
+├── routine_exercises.js # Curriculum exercises: awkward pairs, broken thirds, flash lines
+├── app.js           # Coordinator linking Audio, MIDI, Notation, Routine, and Virtual Keyboard
+├── vst3-plugin/     # JUCE 8 / C++20 cross-platform VST3, AU, and Standalone plugin
+├── PORTING_LOG_VST_STANDALONE.md # Comprehensive C++20/JUCE porting specifications and design log
 └── README.md        # Documentation and user guide
 ```

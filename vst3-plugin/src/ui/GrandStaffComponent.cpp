@@ -36,7 +36,7 @@ void GrandStaffComponent::clearNotes()
 
 void GrandStaffComponent::setPracticeMelody(const Melody* melody, int noteIndex, bool isFinished)
 {
-    const bool melodyChanged = (currentMelody != melody);
+    const bool melodyChanged = (currentMelody == nullptr || melody == nullptr || currentMelody->id != melody->id);
     const bool becameFinished = (!isMelodyFinished && isFinished);
 
     currentMelody = melody;
@@ -47,6 +47,9 @@ void GrandStaffComponent::setPracticeMelody(const Melody* melody, int noteIndex,
     {
         activeReviewMistakeIndex = -1;
         manualScrollOffset = 0.0f;
+        clearNotes();
+        if (currentMelody != nullptr)
+            activeKeySignature = KeySignature::getByKeyName(currentMelody->key);
     }
 
     if (becameFinished)
@@ -70,6 +73,21 @@ void GrandStaffComponent::setPracticeMelody(const Melody* melody, int noteIndex,
     }
 
     repaint();
+}
+
+void GrandStaffComponent::setPracticeState(const Melody* melody, int noteIndex, bool isFinished,
+                                          PracticeMode mode, double playheadBeats, bool isCountingInState,
+                                          bool isAnalyzing, double analysisSecRemaining,
+                                          int inCountInBeat, int inCountInTotal)
+{
+    practiceMode = mode;
+    currentPlayheadBeats = playheadBeats;
+    isCountingIn = isCountingInState;
+    isSilentAnalyzing = isAnalyzing;
+    analysisSecondsRemaining = analysisSecRemaining;
+    countInBeat = inCountInBeat;
+    countInTotal = inCountInTotal;
+    setPracticeMelody(melody, noteIndex, isFinished);
 }
 
 std::vector<int> GrandStaffComponent::getMistakeNoteIndices() const
@@ -150,6 +168,14 @@ void GrandStaffComponent::mouseDown(const juce::MouseEvent& event)
 {
     const auto pos = event.position;
 
+    // 0. Check Skip Silent Analysis button click
+    if (isSilentAnalyzing && !skipAnalysisBtnBounds.isEmpty() && skipAnalysisBtnBounds.contains(pos))
+    {
+        if (onSkipSilentAnalysisClicked)
+            onSkipSilentAnalysisClicked();
+        return;
+    }
+
     // 1. Check Prev button click
     if (!prevMistakeBtnBounds.isEmpty() && prevMistakeBtnBounds.contains(pos))
     {
@@ -223,6 +249,109 @@ void GrandStaffComponent::triggerMistakeFlash()
 {
     lastMistakeTimeMs = juce::Time::getMillisecondCounterHiRes();
     repaint();
+}
+
+void GrandStaffComponent::triggerRecoveryFlash()
+{
+    recoveryFlashTimeMs = juce::Time::getMillisecondCounterHiRes();
+    repaint();
+}
+
+void GrandStaffComponent::drawIntervalRibbon(juce::Graphics& g, juce::Point<float> p1, int midi1, juce::Point<float> p2, int midi2, float alpha, bool isHarmonic)
+{
+    auto info = MusicTheory::classifyInterval(midi1, midi2, preferFlats);
+    if (info.category == IntervalCategory::Unison && isHarmonic)
+        return;
+
+    juce::Graphics::ScopedSaveState saveState(g);
+    g.setOpacity(std::clamp(alpha, 0.2f, 1.0f));
+
+    const float dx = p2.x - p1.x;
+    const float dy = p2.y - p1.y;
+
+    juce::Path ribbonPath;
+    ribbonPath.startNewSubPath(p1);
+
+    juce::Point<float> cp1, cp2;
+    if (isHarmonic)
+    {
+        const float arch = std::clamp(std::abs(dy) * 0.35f + 8.0f, 12.0f, 32.0f);
+        cp1 = { p1.x + arch, p1.y + dy * 0.25f };
+        cp2 = { p2.x + arch, p1.y + dy * 0.75f };
+    }
+    else
+    {
+        const float tension = std::clamp(std::abs(dx) / 180.0f, 0.32f, 0.48f);
+        cp1 = { p1.x + dx * tension, p1.y };
+        cp2 = { p2.x - dx * tension, p2.y };
+    }
+
+    ribbonPath.cubicTo(cp1, cp2, p2);
+
+    // Glowing aura stroke
+    g.setColour(info.glow);
+    g.strokePath(ribbonPath, juce::PathStrokeType(6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Core ribbon stroke
+    g.setColour(info.color);
+    g.strokePath(ribbonPath, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Floating interval badge at midpoint (t = 0.5)
+    const float t = 0.5f;
+    const float mt = 1.0f - t;
+    const float midX = mt*mt*mt*p1.x + 3.0f*mt*mt*t*cp1.x + 3.0f*mt*t*t*cp2.x + t*t*t*p2.x;
+    const float midY = mt*mt*mt*p1.y + 3.0f*mt*mt*t*cp1.y + 3.0f*mt*t*t*cp2.y + t*t*t*p2.y;
+
+    const auto badgeFont = juce::FontOptions(9.5f, juce::Font::bold);
+    g.setFont(badgeFont);
+    const float textW = g.getCurrentFont().getStringWidth(info.shortLabel) + 8.0f;
+    const float textH = 15.0f;
+    const juce::Rectangle<float> badgeBounds(midX - textW * 0.5f, midY - textH * 0.5f, textW, textH);
+
+    g.setColour(juce::Colour::fromRGB(11, 15, 25));
+    g.fillRoundedRectangle(badgeBounds, 5.0f);
+
+    g.setColour(info.color.withAlpha(0.9f));
+    g.drawRoundedRectangle(badgeBounds, 5.0f, 1.2f);
+    g.setColour(info.color.brighter(0.2f));
+    g.drawText(info.shortLabel, badgeBounds.toNearestInt(), juce::Justification::centred);
+}
+
+static float calculateXForBeat(double beats, const Melody& melody, const std::vector<float>& noteXPositions, float notesStartX)
+{
+    if (noteXPositions.empty() || melody.notes.empty())
+        return notesStartX;
+
+    if (beats <= melody.notes.front().startBeat)
+    {
+        const double firstStart = melody.notes.front().startBeat;
+        if (firstStart <= 0.0)
+            return noteXPositions.front();
+        const float frac = static_cast<float>(std::max(0.0, beats / firstStart));
+        return notesStartX + frac * (noteXPositions.front() - notesStartX);
+    }
+
+    for (size_t i = 0; i < melody.notes.size(); ++i)
+    {
+        const double noteStart = melody.notes[i].startBeat;
+        if (i + 1 < melody.notes.size())
+        {
+            const double nextStart = melody.notes[i + 1].startBeat;
+            if (beats >= noteStart && beats < nextStart)
+            {
+                const double span = nextStart - noteStart;
+                const float frac = (span > 0.0001) ? static_cast<float>((beats - noteStart) / span) : 0.0f;
+                return noteXPositions[i] + frac * (noteXPositions[i + 1] - noteXPositions[i]);
+            }
+        }
+        else
+        {
+            const double span = std::max(0.5, static_cast<double>(melody.notes[i].duration));
+            const float frac = static_cast<float>(std::min(1.5, (beats - noteStart) / span));
+            return noteXPositions[i] + frac * 80.0f;
+        }
+    }
+    return noteXPositions.back();
 }
 
 void GrandStaffComponent::paint(juce::Graphics& g)
@@ -534,6 +663,14 @@ void GrandStaffComponent::paint(juce::Graphics& g)
                     scrollX = totalScoreWidth - availableWidth + 40.0f;
                 }
             }
+            else if (practiceMode == PracticeMode::StrictTime || practiceMode == PracticeMode::FirstRead || practiceMode == PracticeMode::Tempo)
+            {
+                const float rawPlayheadX = calculateXForBeat(currentPlayheadBeats, *currentMelody, noteXPositions, notesStartX);
+                const float focusX = notesStartX + availableWidth * 0.28f;
+                scrollX = std::max(0.0f, rawPlayheadX - focusX);
+                const float maxScroll = totalScoreWidth - availableWidth + 40.0f;
+                scrollX = std::min(scrollX, maxScroll);
+            }
             else
             {
                 const float activeX = (currentNoteIndex >= 0 && currentNoteIndex < totalNotes)
@@ -547,8 +684,12 @@ void GrandStaffComponent::paint(juce::Graphics& g)
         }
 
         // Apply manual drag / wheel offset if user scrolled
+        if (std::isnan(manualScrollOffset))
+            manualScrollOffset = 0.0f;
         const float maxScrollLimit = std::max(0.0f, totalScoreWidth - availableWidth + 40.0f);
         scrollX = std::clamp(scrollX + manualScrollOffset, 0.0f, maxScrollLimit);
+        if (std::isnan(scrollX))
+            scrollX = 0.0f;
 
         const float labelBaselineY = bassBottomY + lineSpacing * 1.05f;
 
@@ -564,6 +705,42 @@ void GrandStaffComponent::paint(juce::Graphics& g)
 
             // Measure Barlines with measure numbers
             drawMeasureBarlines(g, barlineXPositions, scrollX, trebleTopY, bassBottomY, lineSpacing);
+
+            // Draw interval ribbons connecting consecutive notes
+            if (intervalContourEnabled && totalNotes > 1)
+            {
+                for (int i = 1; i < totalNotes; ++i)
+                {
+                    const auto& n1 = currentMelody->notes[static_cast<size_t>(i - 1)];
+                    const auto& n2 = currentMelody->notes[static_cast<size_t>(i)];
+
+                    const float x1 = noteXPositions[static_cast<size_t>(i - 1)] - scrollX;
+                    const float x2 = noteXPositions[static_cast<size_t>(i)] - scrollX;
+
+                    if (x2 < notesStartX - 50.0f || x1 > staffRightX + 50.0f)
+                        continue;
+
+                    const auto info1 = MusicTheory::getNoteInfo(n1.midi, preferFlats);
+                    const bool isTreble1 = (n1.midi >= 60);
+                    const float clefBottomY1 = isTreble1 ? trebleBottomY : bassBottomY;
+                    const int baseStep1 = isTreble1 ? 2 : -10;
+                    const float y1 = clefBottomY1 - static_cast<float>(info1.diatonicStep - baseStep1) * (lineSpacing * 0.5f);
+
+                    const auto info2 = MusicTheory::getNoteInfo(n2.midi, preferFlats);
+                    const bool isTreble2 = (n2.midi >= 60);
+                    const float clefBottomY2 = isTreble2 ? trebleBottomY : bassBottomY;
+                    const int baseStep2 = isTreble2 ? 2 : -10;
+                    const float y2 = clefBottomY2 - static_cast<float>(info2.diatonicStep - baseStep2) * (lineSpacing * 0.5f);
+
+                    float alpha = 0.85f;
+                    if (i <= currentNoteIndex)
+                        alpha = 0.35f;
+                    else if (i == currentNoteIndex + 1)
+                        alpha = 1.0f;
+
+                    drawIntervalRibbon(g, { x1, y1 }, n1.midi, { x2, y2 }, n2.midi, alpha, false);
+                }
+            }
 
             // Draw notes in sequence
             for (int i = 0; i < totalNotes; ++i)
@@ -588,6 +765,159 @@ void GrandStaffComponent::paint(juce::Graphics& g)
                               trebleBottomY, bassBottomY, lineSpacing,
                               isTarget, isPast, timestampMs, eval, labelBaselineY, isReviewActive);
             }
+
+            // Visual Disrupter: The Vanishing Bar & The Advance Curtain
+            if (disrupterMode == VisualDisrupterMode::VanishingBar)
+            {
+                drawVanishingBarMask(g, barlineXPositions, scrollX, notesStartX, staffRightX, trebleTopY, bassBottomY, beatsPerMeasure);
+            }
+            else if (disrupterMode == VisualDisrupterMode::AdvanceCurtain)
+            {
+                const float rawPlayheadX = calculateXForBeat(currentPlayheadBeats, *currentMelody, noteXPositions, notesStartX);
+                const float playheadX = rawPlayheadX - scrollX;
+                drawAdvanceCurtain(g, playheadX, notesStartX, trebleTopY, bassBottomY);
+            }
+
+            // Decoupled Eye Cursor (1 measure ahead visual pacing guide)
+            if (decoupledEyeCursorEnabled && !isMelodyFinished && !isCountingIn && !isSilentAnalyzing)
+            {
+                const float eyeBeats = static_cast<float>(currentPlayheadBeats + beatsPerMeasure);
+                const float rawEyeX = calculateXForBeat(eyeBeats, *currentMelody, noteXPositions, notesStartX);
+                const float eyeX = rawEyeX - scrollX;
+                if (eyeX >= notesStartX - 10.0f && eyeX <= staffRightX + 10.0f)
+                {
+                    drawDecoupledEyeCursor(g, eyeX, trebleTopY, bassBottomY);
+                }
+            }
+
+            // Continuous glowing playhead cursor in time-driven modes
+            const bool isTimeDriven = (practiceMode == PracticeMode::StrictTime ||
+                                       practiceMode == PracticeMode::FirstRead ||
+                                       practiceMode == PracticeMode::Tempo);
+            if (isTimeDriven && !isMelodyFinished && !isCountingIn && !isSilentAnalyzing)
+            {
+                const float rawPlayheadX = calculateXForBeat(currentPlayheadBeats, *currentMelody, noteXPositions, notesStartX);
+                const float playheadX = rawPlayheadX - scrollX;
+
+                if (playheadX >= notesStartX - 10.0f && playheadX <= staffRightX + 10.0f)
+                {
+                    const bool isRecoveryActive = (timestampMs - recoveryFlashTimeMs < 1200.0);
+                    const bool isDimmed = decoupledEyeCursorEnabled;
+                    const auto cursorColour = isRecoveryActive ? juce::Colour::fromRGB(16, 185, 129)
+                                                               : juce::Colour::fromRGB(56, 189, 248);
+
+                    // Subtle glowing beam aura
+                    g.setColour(cursorColour.withAlpha(isDimmed ? 0.08f : 0.18f));
+                    g.fillRect(playheadX - 6.0f, trebleTopY - 10.0f, 12.0f, (bassBottomY - trebleTopY) + 20.0f);
+
+                    // Playhead cursor line
+                    g.setColour(cursorColour.withAlpha(isDimmed ? 0.40f : 1.0f));
+                    g.drawLine(playheadX, trebleTopY - 8.0f, playheadX, bassBottomY + 8.0f, isDimmed ? 1.4f : 2.2f);
+
+                    // Top pointer cap
+                    juce::Path topCap;
+                    const float capW = isDimmed ? 3.5f : 5.5f;
+                    topCap.addTriangle(playheadX, trebleTopY - 1.0f,
+                                       playheadX - capW, trebleTopY - 9.0f,
+                                       playheadX + capW, trebleTopY - 9.0f);
+                    g.fillPath(topCap);
+
+                    // Bottom pointer cap
+                    juce::Path botCap;
+                    botCap.addTriangle(playheadX, bassBottomY + 1.0f,
+                                       playheadX - capW, bassBottomY + 9.0f,
+                                       playheadX + capW, bassBottomY + 9.0f);
+                    g.fillPath(botCap);
+
+                    // In-tempo recovery banner
+                    if (isRecoveryActive)
+                    {
+                        g.setColour(juce::Colour::fromRGB(16, 185, 129));
+                        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+                        g.drawText(juce::String::fromUTF8("⚡ IN-TEMPO RECOVERY!"),
+                                   playheadX - 80.0f, trebleTopY - 26.0f, 160.0f, 16.0f,
+                                   juce::Justification::centred);
+                    }
+                }
+            }
+        }
+
+        // Silent Analysis or Count-In overlay banners
+        if (isSilentAnalyzing)
+        {
+            const float bannerW = std::min(w - 48.0f, 540.0f);
+            const float bannerH = 46.0f;
+            const float bannerX = (w - bannerW) * 0.5f;
+            const float bannerY = trebleTopY - bannerH - 8.0f;
+            const auto bannerRect = juce::Rectangle<float>(bannerX, bannerY > 8.0f ? bannerY : 8.0f, bannerW, bannerH);
+
+            g.setColour(juce::Colour::fromRGB(15, 23, 42).withAlpha(0.96f));
+            g.fillRoundedRectangle(bannerRect, 10.0f);
+            g.setColour(juce::Colour::fromRGB(245, 158, 11).withAlpha(0.85f));
+            g.drawRoundedRectangle(bannerRect, 10.0f, 1.5f);
+
+            // Title line
+            const int sec = static_cast<int>(std::ceil(analysisSecondsRemaining));
+            const juce::String analysisText = juce::String::fromUTF8("\xF0\x9F\x91\x80 First-Read Silent Analysis (Study clefs, key & rhythm)");
+            g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(251, 191, 36));
+            g.drawText(analysisText, bannerRect.getX() + 14.0f, bannerRect.getY() + 4.0f, bannerRect.getWidth() - 170.0f, 20.0f, juce::Justification::centredLeft);
+
+            // Timer display pill
+            const auto timerPill = juce::Rectangle<float>(bannerRect.getRight() - 162.0f, bannerRect.getY() + 4.0f, 54.0f, 22.0f);
+            g.setColour(juce::Colour::fromRGB(245, 158, 11).withAlpha(0.2f));
+            g.fillRoundedRectangle(timerPill, 5.0f);
+            g.setColour(juce::Colour::fromRGB(245, 158, 11));
+            g.drawRoundedRectangle(timerPill, 5.0f, 1.0f);
+            g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(253, 230, 138));
+            g.drawText(juce::String(sec) + "s", timerPill, juce::Justification::centred);
+
+            // Ready Now / Skip button
+            skipAnalysisBtnBounds = juce::Rectangle<float>(bannerRect.getRight() - 98.0f, bannerRect.getY() + 4.0f, 88.0f, 22.0f);
+            g.setColour(juce::Colour::fromRGB(245, 158, 11));
+            g.fillRoundedRectangle(skipAnalysisBtnBounds, 5.0f);
+            g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(15, 23, 42)); // Dark text on amber button
+            g.drawText(juce::String::fromUTF8("\xE2\x96\xB6 Ready Now"), skipAnalysisBtnBounds, juce::Justification::centred);
+
+            // Progress bar underneath
+            const auto barRect = juce::Rectangle<float>(bannerRect.getX() + 14.0f, bannerRect.getY() + 32.0f, bannerRect.getWidth() - 28.0f, 6.0f);
+            g.setColour(juce::Colour::fromRGB(30, 41, 59));
+            g.fillRoundedRectangle(barRect, 3.0f);
+            const float progress = std::clamp(static_cast<float>(analysisSecondsRemaining / 30.0), 0.0f, 1.0f);
+            if (progress > 0.0f)
+            {
+                g.setColour(juce::Colour::fromRGB(245, 158, 11));
+                g.fillRoundedRectangle(barRect.withWidth(barRect.getWidth() * progress), 3.0f);
+            }
+        }
+        else
+        {
+            skipAnalysisBtnBounds = {};
+        }
+
+        if (isCountingIn && !isSilentAnalyzing)
+        {
+            const float bannerW = 260.0f;
+            const float bannerH = 48.0f;
+            const float bannerX = (w - bannerW) * 0.5f;
+            const float bannerY = trebleTopY - bannerH - 8.0f;
+            const auto bannerRect = juce::Rectangle<float>(bannerX, bannerY > 8.0f ? bannerY : 8.0f, bannerW, bannerH);
+
+            g.setColour(juce::Colour::fromRGB(15, 23, 42).withAlpha(0.96f));
+            g.fillRoundedRectangle(bannerRect, 10.0f);
+            g.setColour(juce::Colour::fromRGB(56, 189, 248).withAlpha(0.85f));
+            g.drawRoundedRectangle(bannerRect, 10.0f, 1.5f);
+
+            g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+            g.setColour(juce::Colour::fromRGB(125, 211, 252));
+            g.drawText(juce::String::fromUTF8("TEMPO COUNT-IN \xE2\x80\xA2 GET READY!"), bannerRect.getX(), bannerRect.getY() + 4.0f, bannerRect.getWidth(), 14.0f, juce::Justification::centred);
+
+            g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+            g.setColour(juce::Colours::white);
+            const int displayBeat = (countInBeat > 0) ? countInBeat : 1;
+            g.drawText(juce::String(displayBeat), bannerRect.getX(), bannerRect.getY() + 18.0f, bannerRect.getWidth(), 24.0f, juce::Justification::centred);
         }
     }
 }
@@ -757,6 +1087,29 @@ void GrandStaffComponent::drawScoreNote(juce::Graphics& g, const MelodyNote& not
         // Bright rose outer beacon ring
         g.setColour(juce::Colour::fromRGB(251, 113, 133));
         g.drawEllipse(x - headW * 0.9f, noteY - headH * 0.9f, headW * 1.8f, headH * 1.8f, 2.0f);
+    }
+
+    // 3c. Accidental Alert Warning Halo & Ring (for non-diatonic printed notes)
+    const bool isDeviation = !activeKeySignature.isDiatonic(note.midi);
+    const bool shouldAlert = accidentalAlertEnabled && isDeviation;
+    if (shouldAlert)
+    {
+        const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(timestampMs) * 0.007f);
+
+        // Luminous Amber Warning Pulse Halo
+        g.setColour(juce::Colour::fromRGB(245, 158, 11).withAlpha(0.24f + 0.16f * pulse));
+        g.fillEllipse(x - headW * (1.15f + 0.25f * pulse), noteY - headH * (1.15f + 0.25f * pulse),
+                      headW * (2.3f + 0.5f * pulse), headH * (2.3f + 0.5f * pulse));
+
+        // Amber warning outline ring
+        g.setColour(juce::Colour::fromRGB(245, 158, 11).withAlpha(0.85f));
+        g.drawEllipse(x - headW * 0.82f, noteY - headH * 0.82f, headW * 1.64f, headH * 1.64f, 1.6f);
+
+        // If not past and not target, tint notehead amber
+        if (!isPast && !isTarget)
+        {
+            noteColor = juce::Colour::fromRGB(251, 191, 36); // Amber 400
+        }
     }
 
     // 4. Notehead
@@ -1185,6 +1538,156 @@ void GrandStaffComponent::drawActivePlayedNotes(juce::Graphics& g, float targetX
 
         idx++;
     }
+}
+
+void GrandStaffComponent::drawVanishingBarMask(juce::Graphics& g, const std::vector<float>& barlineXs, float scrollX,
+                                               float notesStartX, float staffRightX, float trebleTopY,
+                                               float bassBottomY, float beatsPerMeasure)
+{
+    if (barlineXs.empty() || isMelodyFinished || isCountingIn || isSilentAnalyzing)
+        return;
+
+    const float bPerMeasure = (beatsPerMeasure > 0.0f) ? beatsPerMeasure : 4.0f;
+    const int activeMeasure = static_cast<int>(std::floor(std::max(0.0, currentPlayheadBeats) / bPerMeasure));
+    const int totalMeasures = static_cast<int>(barlineXs.size());
+
+    for (int m = 0; m <= activeMeasure && m < totalMeasures; ++m)
+    {
+        const float mStartRaw = (m == 0) ? (notesStartX - 4.0f) : barlineXs[static_cast<size_t>(m - 1)];
+        const float mEndRaw = barlineXs[static_cast<size_t>(m)];
+        const float mStartX = mStartRaw - scrollX;
+        const float mEndX = mEndRaw - scrollX;
+        const float mW = mEndX - mStartX;
+
+        if (mEndX < notesStartX - 20.0f || mStartX > staffRightX + 20.0f)
+            continue;
+
+        const float maskY = trebleTopY - 14.0f;
+        const float maskH = (bassBottomY - trebleTopY) + 28.0f;
+        const bool isActiveBar = (m == activeMeasure);
+
+        if (isActiveBar)
+        {
+            g.setColour(juce::Colour::fromRGB(15, 23, 42).withAlpha(0.92f));
+            g.fillRoundedRectangle(mStartX, maskY, mW, maskH, 6.0f);
+
+            g.setColour(juce::Colour::fromRGB(245, 158, 11)); // Amber 500
+            float dashedLengths[] = { 5.0f, 3.0f };
+            g.drawDashedLine(juce::Line<float>(mStartX, maskY, mEndX, maskY), dashedLengths, 2, 1.5f);
+            g.drawDashedLine(juce::Line<float>(mStartX, maskY + maskH, mEndX, maskY + maskH), dashedLengths, 2, 1.5f);
+            g.drawDashedLine(juce::Line<float>(mStartX, maskY, mStartX, maskY + maskH), dashedLengths, 2, 1.5f);
+            g.drawDashedLine(juce::Line<float>(mEndX, maskY, mEndX, maskY + maskH), dashedLengths, 2, 1.5f);
+
+            if (mW > 60.0f)
+            {
+                const float badgeW = std::min(mW - 12.0f, 185.0f);
+                const float badgeH = 20.0f;
+                const float badgeX = mStartX + (mW - badgeW) * 0.5f;
+                const float badgeY = trebleTopY - 26.0f;
+
+                g.setColour(juce::Colour::fromRGB(15, 23, 42));
+                g.fillRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f);
+                g.setColour(juce::Colour::fromRGB(245, 158, 11));
+                g.drawRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f, 1.2f);
+
+                g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+                g.setColour(juce::Colour::fromRGB(251, 191, 36));
+                g.drawText(juce::String::fromUTF8("🧠 BUFFER BAR ") + juce::String(m + 1) + " (MEMORY)",
+                           badgeX, badgeY, badgeW, badgeH, juce::Justification::centred);
+            }
+        }
+        else
+        {
+            g.setColour(juce::Colour::fromRGB(15, 23, 42).withAlpha(0.82f));
+            g.fillRoundedRectangle(mStartX, maskY, mW, maskH, 6.0f);
+            g.setColour(juce::Colour::fromRGB(51, 65, 85).withAlpha(0.6f));
+            g.drawRoundedRectangle(mStartX, maskY, mW, maskH, 6.0f, 1.0f);
+        }
+    }
+}
+
+void GrandStaffComponent::drawAdvanceCurtain(juce::Graphics& g, float curtainX, float notesStartX,
+                                             float trebleTopY, float bassBottomY)
+{
+    if (isMelodyFinished || isCountingIn || isSilentAnalyzing || curtainX <= notesStartX)
+        return;
+
+    const float maskY = trebleTopY - 14.0f;
+    const float maskH = (bassBottomY - trebleTopY) + 28.0f;
+    const float curtainLeft = notesStartX - 6.0f;
+    const float curtainW = curtainX - curtainLeft;
+
+    juce::ColourGradient curtainGrad(
+        juce::Colour::fromRGB(2, 6, 23).withAlpha(0.96f), curtainLeft, 0.0f,
+        juce::Colour::fromRGB(30, 41, 59).withAlpha(0.90f), curtainX, 0.0f,
+        false
+    );
+    g.setGradientFill(curtainGrad);
+    g.fillRect(curtainLeft, maskY, curtainW, maskH);
+
+    // Leading curtain edge
+    g.setColour(juce::Colour::fromRGB(245, 158, 11)); // Amber 500
+    g.drawLine(curtainX, maskY, curtainX, maskY + maskH, 2.2f);
+
+    const float badgeW = 76.0f;
+    const float badgeH = 18.0f;
+    const float badgeX = curtainX - badgeW;
+    const float badgeY = trebleTopY - 24.0f;
+
+    if (badgeX > curtainLeft)
+    {
+        g.setColour(juce::Colour::fromRGB(15, 23, 42));
+        g.fillRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f);
+        g.setColour(juce::Colour::fromRGB(245, 158, 11));
+        g.drawRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f, 1.0f);
+
+        g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
+        g.setColour(juce::Colour::fromRGB(251, 191, 36));
+        g.drawText(juce::String::fromUTF8("⛔ NO LINGER"), badgeX, badgeY, badgeW, badgeH, juce::Justification::centred);
+    }
+}
+
+void GrandStaffComponent::drawDecoupledEyeCursor(juce::Graphics& g, float eyeX, float trebleTopY, float bassBottomY)
+{
+    const auto eyeColour = juce::Colour::fromRGB(56, 189, 248); // Electric Sky 400
+
+    // Glowing beam
+    g.setColour(eyeColour.withAlpha(0.25f));
+    g.fillRect(eyeX - 8.0f, trebleTopY - 12.0f, 16.0f, (bassBottomY - trebleTopY) + 24.0f);
+
+    // Dashed guide line
+    g.setColour(eyeColour);
+    float dashed[] = { 6.0f, 3.0f };
+    g.drawDashedLine(juce::Line<float>(eyeX, trebleTopY - 8.0f, eyeX, bassBottomY + 8.0f), dashed, 2, 2.2f);
+
+    // Top pointer cap
+    juce::Path topCap;
+    topCap.addTriangle(eyeX, trebleTopY - 1.0f,
+                       eyeX - 6.0f, trebleTopY - 10.0f,
+                       eyeX + 6.0f, trebleTopY - 10.0f);
+    g.fillPath(topCap);
+
+    // Bottom pointer cap
+    juce::Path botCap;
+    botCap.addTriangle(eyeX, bassBottomY + 1.0f,
+                       eyeX - 6.0f, bassBottomY + 10.0f,
+                       eyeX + 6.0f, bassBottomY + 10.0f);
+    g.fillPath(botCap);
+
+    // Eye Badge
+    const float badgeW = 86.0f;
+    const float badgeH = 20.0f;
+    const float badgeX = eyeX - badgeW * 0.5f;
+    const float badgeY = trebleTopY - 32.0f;
+
+    g.setColour(juce::Colour::fromRGB(15, 23, 42));
+    g.fillRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f);
+    g.setColour(eyeColour);
+    g.drawRoundedRectangle(badgeX, badgeY, badgeW, badgeH, 4.0f, 1.2f);
+
+    g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+    g.setColour(juce::Colour::fromRGB(125, 211, 252)); // Sky 300
+    g.drawText(juce::String::fromUTF8("👁 LOOK HERE"), badgeX, badgeY, badgeW, badgeH, juce::Justification::centred);
 }
 
 } // namespace MidiSheet

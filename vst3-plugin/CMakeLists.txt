@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
-project(MidiSheet VERSION 0.1.0 LANGUAGES C CXX)
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
+project(MidiSheet VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Automatically downloads JUCE 8 if not already provided locally
 # -------------------------------------------------------------------------
 if(NOT TARGET juce::juce_audio_utils)
+    set(JUCE_TARGET_ARCHITECTURE "x86_64" CACHE STRING "Target architecture")
     include(FetchContent)
     message(STATUS "Fetching JUCE 8.0.4 framework...")
     FetchContent_Declare(
@@ -51,10 +57,14 @@ target_sources(MidiSheet
         src/core/MelodyDatabase.h
         src/core/MelodyScorer.cpp
         src/core/MelodyScorer.h
+        src/core/DailyRoutineManager.cpp
+        src/core/DailyRoutineManager.h
         src/ui/GrandStaffComponent.cpp
         src/ui/GrandStaffComponent.h
         src/ui/ScoreboardComponent.cpp
         src/ui/ScoreboardComponent.h
+        src/ui/DailyRoutineComponent.cpp
+        src/ui/DailyRoutineComponent.h
         src/ui/MelodySelectorComponent.cpp
         src/ui/MelodySelectorComponent.h
         src/ui/VirtualPianoComponent.cpp

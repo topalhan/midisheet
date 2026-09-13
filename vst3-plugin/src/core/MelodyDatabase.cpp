@@ -375,6 +375,7 @@ bool MelodyDatabase::loadMidiFile(const juce::File& file, juce::String& outMelod
         MelodyNote mn;
         mn.midi = rn.midi;
         mn.duration = rn.duration;
+        mn.startBeat = rn.startTick / ticksPerQuarter;
         mn.name = MusicTheory::getNoteInfo(rn.midi).fullName;
         m.notes.push_back(mn);
         lastTick = rn.startTick;
@@ -382,6 +383,9 @@ bool MelodyDatabase::loadMidiFile(const juce::File& file, juce::String& outMelod
 
     if (m.notes.empty())
         return false;
+
+    m.timeSignature.numerator = m.timeSigNum;
+    m.timeSignature.denominator = m.timeSigDen;
 
     if (isSpecificChannel)
         m.description = "Imported from " + file.getFileName() + " [Ch " + juce::String(targetChannel) + "] (" + juce::String(m.notes.size()) + " notes)";
@@ -598,6 +602,18 @@ std::vector<Melody> MelodyDatabase::createMelodyLibrary()
             { 70, 2.0f, "Bb4" }
         };
         list.push_back(m);
+    }
+
+    for (auto& mel : list)
+    {
+        mel.timeSignature.numerator = mel.timeSigNum;
+        mel.timeSignature.denominator = mel.timeSigDen;
+        double beatAcc = 0.0;
+        for (auto& n : mel.notes)
+        {
+            n.startBeat = beatAcc;
+            beatAcc += n.duration;
+        }
     }
 
     return list;

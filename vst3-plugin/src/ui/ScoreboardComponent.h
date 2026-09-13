@@ -4,6 +4,8 @@
 #include "../core/MelodyScorer.h"
 #include "../core/MusicTheory.h"
 
+#include "GrandStaffComponent.h"
+
 namespace MidiSheet
 {
 
@@ -17,14 +19,28 @@ public:
 
     void updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes = {}, bool preferFlats = false, int reviewMistakeIndex = -1);
 
+    void setDisrupterMode(VisualDisrupterMode mode);
+    void setEyeCursorEnabled(bool enabled);
+    void setMetronomeEnabled(bool enabled);
+
     std::function<void()> onSelectMelodyClicked;
     std::function<void()> onRestartClicked;
     std::function<void(PracticeMode)> onModeChanged;
+    std::function<void(VisualDisrupterMode)> onDisrupterModeChanged;
+    std::function<void(bool)> onEyeCursorToggled;
+    std::function<void(bool)> onMetronomeToggled;
+    std::function<void()> onRoutineClicked;
 
 private:
     juce::TextButton selectMelodyButton;
     juce::TextButton restartButton;
+    juce::TextButton routineButton;
+    juce::TextButton metronomeButton;
+    bool metronomeActive = true;
     juce::ComboBox modeSelector;
+    juce::ComboBox disrupterSelector;
+    juce::TextButton eyeCursorButton;
+    bool eyeCursorActive = false;
 
     juce::String melodyTitle = "Ode to Joy";
     juce::String composer = "L. van Beethoven";
@@ -40,6 +56,9 @@ private:
     TimingRating currentRating = TimingRating::None;
     int accuracyPercent = 100;
     int rhythmPercent = 100;
+    int sightReadingScore = 100;
+    int recoveries = 0;
+    PracticeMode practiceMode = PracticeMode::Wait;
     int currentStreak = 0;
     int noteIndex = 0;
     int totalNotes = 15;

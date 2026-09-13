@@ -24,6 +24,11 @@ export class NotationRenderer {
       bassActiveColor: '#a855f7',// vibrant purple glow for bass
       scrollSpeed: 120,         // pixels per second in scrolling mode
       splitPoint: 60,           // Middle C split point for treble/bass
+      showIntervalContour: true,// Color-coded interval ribbons (Step=Green, Skip=Orange, Leap=Purple)
+      accidentalAlert: true,    // Accidental Alert flash for notes deviating from key signature
+      keySignature: 'C Major',  // Active key signature for diatonic vs deviation reference
+      disrupterMode: 'none',     // 'none', 'vanishing_bar', 'advance_curtain'
+      decoupledEyeCursor: false, // true = display decoupled eye cursor 1 measure ahead
       ...options
     };
 
@@ -31,6 +36,8 @@ export class NotationRenderer {
     this.activeNotes = new Map();
     // History of played notes for scrolling timeline mode
     this.noteHistory = []; // { midi, velocity, startTime, endTime, active }
+    // Melodic phrase buffer for live Free Play contour & broken thirds
+    this.recentPhrase = [];
 
     // Fading notes cache for smooth visual release
     this.fadingNotes = new Map();
@@ -58,6 +65,10 @@ export class NotationRenderer {
     this.dragStartX = 0;
     this.dragStartScroll = 0;
 
+    // Strict Sight-Reading playhead & Recovery tracking
+    this.playheadBeats = 0;
+    this.flashRecoveryTimestamp = 0;
+
     this.initCanvas();
     this.setupInteractionEvents();
     this.startRenderLoop();
@@ -82,6 +93,14 @@ export class NotationRenderer {
 
   setOption(key, value) {
     this.options[key] = value;
+  }
+
+  setDisrupterMode(mode) {
+    this.options.disrupterMode = mode;
+  }
+
+  setDecoupledEyeCursor(enabled) {
+    this.options.decoupledEyeCursor = !!enabled;
   }
 
   /**
@@ -242,9 +261,21 @@ export class NotationRenderer {
       active: true
     });
 
+    // In live mode, add to recent melodic phrase
+    this.recentPhrase.push({
+      midi,
+      velocity: noteData.velocity,
+      startTime: now,
+      endTime: null,
+      active: true
+    });
+
     // Limit history memory
     if (this.noteHistory.length > 500) {
       this.noteHistory.shift();
+    }
+    if (this.recentPhrase.length > 12) {
+      this.recentPhrase.shift();
     }
   }
 
@@ -269,19 +300,43 @@ export class NotationRenderer {
         break;
       }
     }
+
+    // Update phrase note end time
+    for (let i = this.recentPhrase.length - 1; i >= 0; i--) {
+      if (this.recentPhrase[i].midi === midi && this.recentPhrase[i].active) {
+        this.recentPhrase[i].active = false;
+        this.recentPhrase[i].endTime = now;
+        break;
+      }
+    }
   }
 
   clearNotes() {
     this.activeNotes.clear();
     this.fadingNotes.clear();
+    this.recentPhrase = [];
   }
 
   startRenderLoop() {
     const loop = (timestamp) => {
-      this.render(timestamp);
-      this.animationFrameId = requestAnimationFrame(loop);
+      try {
+        this.render(timestamp);
+      } catch (err) {
+        console.error('Error in notation render frame:', err);
+      } finally {
+        this.animationFrameId = requestAnimationFrame(loop);
+      }
     };
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+    }
     this.animationFrameId = requestAnimationFrame(loop);
+  }
+
+  ensureRenderLoop() {
+    if (!this.animationFrameId) {
+      this.startRenderLoop();
+    }
   }
 
   destroy() {
@@ -496,49 +551,129 @@ export class NotationRenderer {
   /**
    * Render Live Mode: Active held chord/notes displayed centrally on Grand Staff
    */
+  /**
+   * Render Live Mode: Active held chord/notes and melodic contour ribbons displayed on Grand Staff
+   */
   renderLiveMode(ctx, staffX, staffWidth, trebleBottomY, bassBottomY, lineSpacing, timestamp) {
     const preferFlats = this.options.preferFlats;
+    const now = performance.now();
 
-    // Only render currently active, held notes for zero-latency Note Off response
-    if (this.activeNotes.size === 0) {
-      // Draw empty measure note rest placeholder or subtle hint
+    // Prune phrase notes older than 3500ms if inactive
+    this.recentPhrase = this.recentPhrase.filter(n => n.active || (now - (n.endTime || n.startTime) < 3500));
+
+    // If no active held notes and no recent phrase:
+    if (this.activeNotes.size === 0 && this.recentPhrase.length === 0) {
       this.drawIdleStaffGuide(ctx, staffX, staffWidth, trebleBottomY, bassBottomY, lineSpacing);
       return;
     }
 
-    // Sort notes by pitch ascending
-    const sorted = Array.from(this.activeNotes.values()).sort((a, b) => a.midi - b.midi);
+    // Cluster phrase notes into chord columns by start time (within 65ms = struck together)
+    const columns = [];
+    const sortedPhrase = [...this.recentPhrase].sort((a, b) => a.startTime - b.startTime);
 
-    // Group notes by staff (treble vs bass)
-    const trebleNotes = [];
-    const bassNotes = [];
+    sortedPhrase.forEach(item => {
+      let col = columns.find(c => Math.abs(c.startTime - item.startTime) < 65);
+      if (!col) {
+        col = {
+          startTime: item.startTime,
+          endTime: item.endTime,
+          notes: []
+        };
+        columns.push(col);
+      }
+      if (!col.notes.some(n => n.midi === item.midi)) {
+        col.notes.push(item);
+      }
+      if (item.active) col.hasActive = true;
+    });
 
-    sorted.forEach(noteData => {
-      const info = MusicTheory.getNoteInfo(noteData.midi, preferFlats);
-      const clef = noteData.midi >= this.options.splitPoint ? 'treble' : 'bass';
-      const staffPos = MusicTheory.getStaffPosition(info.diatonicStep, clef);
+    // Fallback: ensure active notes are present
+    if (this.activeNotes.size > 0 && columns.length === 0) {
+      columns.push({
+        startTime: now,
+        endTime: null,
+        hasActive: true,
+        notes: Array.from(this.activeNotes.values())
+      });
+    }
 
-      const item = {
-        ...noteData,
-        info,
-        clef,
-        staffPos
-      };
+    // Position columns horizontally across the staff
+    const numCols = columns.length;
+    let startX = staffX + staffWidth * 0.52;
+    let colSpacing = 0;
 
-      if (clef === 'treble') {
-        trebleNotes.push(item);
-      } else {
-        bassNotes.push(item);
+    if (numCols > 1) {
+      colSpacing = Math.min(84, Math.max(48, (staffWidth * 0.65) / (numCols - 1)));
+      const totalSpan = (numCols - 1) * colSpacing;
+      startX = staffX + staffWidth * 0.5 - totalSpan / 2;
+    }
+
+    // 1. Compute positions and render note items for each column
+    columns.forEach((col, cIdx) => {
+      const colX = numCols === 1 ? startX : (startX + cIdx * colSpacing);
+      col.x = colX;
+
+      // Group into treble & bass
+      col.notes.forEach(noteData => {
+        const info = MusicTheory.getNoteInfo(noteData.midi, preferFlats);
+        const clef = noteData.midi >= this.options.splitPoint ? 'treble' : 'bass';
+        const staffPos = MusicTheory.getStaffPosition(info.diatonicStep, clef);
+        const bottomY = clef === 'treble' ? trebleBottomY : bassBottomY;
+        const noteY = bottomY - staffPos * (lineSpacing / 2);
+
+        noteData.info = info;
+        noteData.clef = clef;
+        noteData.staffPos = staffPos;
+        noteData.x = colX;
+        noteData.y = noteY;
+
+        let alpha = 1.0;
+        if (!noteData.active && (noteData.endTime || noteData.releasedTime)) {
+          const rel = noteData.endTime || noteData.releasedTime;
+          const elapsed = now - rel;
+          alpha = Math.max(0.2, 1.0 - elapsed / 3500);
+        }
+        noteData.alpha = alpha;
+      });
+
+      // Render treble chord / notes in this column
+      const trebleNotes = col.notes.filter(n => n.clef === 'treble').sort((a, b) => a.midi - b.midi);
+      if (trebleNotes.length > 0) {
+        this.renderStaffChord(ctx, trebleNotes, colX, trebleBottomY, 'treble', lineSpacing, timestamp);
+      }
+
+      // Render bass chord / notes in this column
+      const bassNotes = col.notes.filter(n => n.clef === 'bass').sort((a, b) => a.midi - b.midi);
+      if (bassNotes.length > 0) {
+        this.renderStaffChord(ctx, bassNotes, colX, bassBottomY, 'bass', lineSpacing, timestamp);
+      }
+
+      // Harmonic Interval Ribbons (within same column if 2+ notes)
+      if (this.options.showIntervalContour && col.notes.length >= 2) {
+        const sortedCol = [...col.notes].sort((a, b) => a.midi - b.midi);
+        for (let j = 0; j < sortedCol.length - 1; j++) {
+          const a = sortedCol[j];
+          const b = sortedCol[j + 1];
+          const linkAlpha = Math.min(a.alpha, b.alpha);
+          this.drawIntervalRibbon(ctx, a, b, lineSpacing, linkAlpha, true);
+        }
       }
     });
 
-    const noteCenterX = staffX + staffWidth * 0.52;
-
-    // Render Treble notes
-    this.renderStaffChord(ctx, trebleNotes, noteCenterX, trebleBottomY, 'treble', lineSpacing, timestamp);
-
-    // Render Bass notes
-    this.renderStaffChord(ctx, bassNotes, noteCenterX, bassBottomY, 'bass', lineSpacing, timestamp);
+    // 2. Melodic Interval Contour Ribbons (between consecutive columns)
+    if (this.options.showIntervalContour && columns.length >= 2) {
+      for (let k = 0; k < columns.length - 1; k++) {
+        const colA = columns[k];
+        const colB = columns[k + 1];
+        // Connect lead / melody note of column A to column B (highest pitch)
+        const leadA = [...colA.notes].sort((a, b) => b.midi - a.midi)[0];
+        const leadB = [...colB.notes].sort((a, b) => b.midi - a.midi)[0];
+        if (leadA && leadB) {
+          const linkAlpha = Math.min(leadA.alpha, leadB.alpha);
+          this.drawIntervalRibbon(ctx, leadA, leadB, lineSpacing, linkAlpha, false);
+        }
+      }
+    }
   }
 
   /**
@@ -680,6 +815,106 @@ export class NotationRenderer {
   }
 
   /**
+   * Draw color-coded connecting ribbon or line between two noteheads
+   * Green for steps (2nd), Orange for skips (3rd), Purple for leaps (4th+)
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object} n1 - starting note { x, y, midi }
+   * @param {object} n2 - ending note { x, y, midi }
+   * @param {number} lineSpacing
+   * @param {number} alpha
+   * @param {boolean} isHarmonic - true if simultaneous chord notes (vertical), false if melodic (horizontal)
+   */
+  drawIntervalRibbon(ctx, n1, n2, lineSpacing, alpha = 1.0, isHarmonic = false) {
+    if (!n1 || !n2 || n1.x === undefined || n1.y === undefined || n2.x === undefined || n2.y === undefined) return;
+
+    const interval = MusicTheory.classifyInterval(n1.midi, n2.midi, this.options.preferFlats);
+    if (interval.category === 'unison' && isHarmonic) return;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.18, Math.min(1.0, alpha));
+
+    const dx = n2.x - n1.x;
+    const dy = n2.y - n1.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 4) {
+      ctx.restore();
+      return;
+    }
+
+    let cp1x, cp1y, cp2x, cp2y;
+    if (isHarmonic) {
+      // Harmonic chord ribbon: subtle outer arch so it doesn't obscure the stem
+      const arch = Math.min(30, Math.abs(dy) * 0.35 + 8);
+      cp1x = n1.x + arch;
+      cp1y = n1.y + dy * 0.25;
+      cp2x = n2.x + arch;
+      cp2y = n1.y + dy * 0.75;
+    } else {
+      // Melodic contour ribbon: smooth horizontal S-curve bezier
+      const tension = Math.min(0.48, Math.max(0.32, Math.abs(dx) / 180));
+      cp1x = n1.x + dx * tension;
+      cp1y = n1.y;
+      cp2x = n2.x - dx * tension;
+      cp2y = n2.y;
+    }
+
+    // 1. Draw glowing ribbon shadow
+    ctx.shadowColor = interval.glow;
+    ctx.shadowBlur = 10;
+
+    // 2. Draw tapered ribbon stroke
+    const ribbonWidth = Math.max(2.5, Math.min(5.5, lineSpacing * 0.32));
+    ctx.strokeStyle = interval.rgba;
+    ctx.lineWidth = ribbonWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(n1.x, n1.y);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, n2.x, n2.y);
+    ctx.stroke();
+
+    // 3. Draw floating micro interval badge at midpoint
+    const t = 0.5;
+    const midX = (1 - t) * (1 - t) * (1 - t) * n1.x + 3 * (1 - t) * (1 - t) * t * cp1x + 3 * (1 - t) * t * t * cp2x + t * t * t * n2.x;
+    const midY = (1 - t) * (1 - t) * (1 - t) * n1.y + 3 * (1 - t) * (1 - t) * t * cp1y + 3 * (1 - t) * t * t * cp2y + t * t * t * n2.y;
+
+    const badgeText = interval.shortLabel; // e.g. "2nd", "3rd", "5th"
+    ctx.font = '700 9.5px "Inter", system-ui, sans-serif';
+    const textMetrics = ctx.measureText(badgeText);
+    const badgePadX = 4.5;
+    const badgeW = textMetrics.width + badgePadX * 2;
+    const badgeH = 15;
+    const badgeX = midX - badgeW / 2;
+    const badgeY = midY - badgeH / 2;
+
+    // Pill background
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillStyle = this.options.theme === 'dark' ? '#090d16' : '#ffffff';
+    ctx.strokeStyle = interval.color;
+    ctx.lineWidth = 1.2;
+
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 7);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    // Pill text
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = interval.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, midX, midY + 0.5);
+
+    ctx.restore();
+  }
+
+  /**
    * Draw elliptical notehead with velocity glow and animation
    */
   drawNotehead(ctx, note, spacing, alpha, timestamp) {
@@ -690,13 +925,38 @@ export class NotationRenderer {
     const ry = spacing * 0.44;
     const rot = -0.32; // ~-18 degrees
 
+    // Determine Key Signature and accidental deviation
+    const noteMidi = (typeof note.midi === 'number') ? note.midi : ((note.info && typeof note.info.midi === 'number') ? note.info.midi : 60);
+    const keySig = (this.practiceData && this.practiceData.melody && this.practiceData.melody.key) || this.options.keySignature || 'C Major';
+    const accDev = MusicTheory.isAccidentalDeviation(noteMidi, keySig);
+    const isAlert = this.options.accidentalAlert && accDev.isDeviation;
+
+    // Outer warning pulse / glow for Accidental Alert Flash
+    if (isAlert) {
+      ctx.save();
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(note.x, note.y, (rx + 7) * 1.3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
+      ctx.fill();
+
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 2]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Velocity-based glow
     if (note.active) {
-      const velNorm = note.velocity / 127;
-      const glowColor = note.clef === 'treble' ? this.options.activeGlowColor : this.options.bassActiveColor;
+      const velNorm = (note.velocity || 100) / 127;
+      const glowColor = isAlert 
+        ? '#f59e0b' 
+        : (note.clef === 'treble' ? this.options.activeGlowColor : this.options.bassActiveColor);
 
       // Outer radial pulse on note strike
-      const elapsed = timestamp - note.startTime;
+      const elapsed = timestamp - (note.startTime || timestamp);
       if (elapsed < 300) {
         const pulse = (1 - elapsed / 300);
         ctx.beginPath();
@@ -709,7 +969,7 @@ export class NotationRenderer {
 
       // Notehead glow
       ctx.shadowColor = glowColor;
-      ctx.shadowBlur = 14 + 10 * velNorm;
+      ctx.shadowBlur = isAlert ? 22 : (14 + 10 * velNorm);
     }
 
     // Main notehead body
@@ -717,9 +977,18 @@ export class NotationRenderer {
     ctx.ellipse(note.x, note.y, rx, ry, rot, 0, Math.PI * 2);
 
     if (note.active) {
-      ctx.fillStyle = note.clef === 'treble' ? '#38bdf8' : '#c084fc';
+      if (isAlert) {
+        ctx.fillStyle = '#fbbf24'; // Luminous Warning Amber
+      } else {
+        ctx.fillStyle = note.clef === 'treble' ? '#38bdf8' : '#c084fc';
+      }
     } else {
-      ctx.fillStyle = this.options.theme === 'dark' ? '#f8fafc' : '#0f172a';
+      if (isAlert) {
+        ctx.fillStyle = this.options.theme === 'dark' ? '#fbbf24' : '#d97706';
+      } else {
+        // Diatonic notehead remains clean, crisp, neutral
+        ctx.fillStyle = this.options.theme === 'dark' ? '#f8fafc' : '#0f172a';
+      }
     }
     ctx.fill();
 
@@ -727,29 +996,41 @@ export class NotationRenderer {
     ctx.shadowBlur = 0;
     ctx.beginPath();
     ctx.ellipse(note.x - rx * 0.2, note.y - ry * 0.2, rx * 0.55, ry * 0.35, rot, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.fillStyle = isAlert ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.45)';
     ctx.fill();
 
     ctx.restore();
   }
 
   /**
-   * Draw musical accidental (# or b)
+   * Draw musical accidental (# or b or natural)
    */
   drawAccidental(ctx, note, spacing, alpha) {
-    if (!note.info.accidental) return;
+    if (!note || !note.info || !note.info.accidental) return;
 
     ctx.save();
     ctx.globalAlpha = alpha;
     const accX = note.x - spacing * 1.5;
     const accY = note.y;
 
-    ctx.fillStyle = note.active ? (note.clef === 'treble' ? '#38bdf8' : '#c084fc') : (this.options.theme === 'dark' ? '#f8fafc' : '#0f172a');
-    ctx.strokeStyle = ctx.fillStyle;
+    const noteMidi = (typeof note.midi === 'number') ? note.midi : ((note.info && typeof note.info.midi === 'number') ? note.info.midi : 60);
+    const keySig = (this.practiceData && this.practiceData.melody && this.practiceData.melody.key) || this.options.keySignature || 'C Major';
+    const accDev = MusicTheory.isAccidentalDeviation(noteMidi, keySig);
+    const isAlert = this.options.accidentalAlert && accDev.isDeviation;
 
-    if (note.info.accidental === '#') {
+    if (isAlert) {
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#f59e0b';
+      ctx.strokeStyle = '#f59e0b';
+    } else {
+      ctx.fillStyle = note.active ? (note.clef === 'treble' ? '#38bdf8' : '#c084fc') : (this.options.theme === 'dark' ? '#f8fafc' : '#0f172a');
+      ctx.strokeStyle = ctx.fillStyle;
+    }
+
+    if (note.info.accidental === '#' || note.info.accidental === '♯') {
       // Crisp vector Sharp symbol
-      ctx.lineWidth = 1.3;
+      ctx.lineWidth = isAlert ? 1.7 : 1.3;
       const w = spacing * 0.48;
       const h = spacing * 0.95;
 
@@ -762,16 +1043,16 @@ export class NotationRenderer {
       ctx.stroke();
 
       // Slanted crossbars
-      ctx.lineWidth = 2.4;
+      ctx.lineWidth = isAlert ? 2.8 : 2.4;
       ctx.beginPath();
       ctx.moveTo(accX - w * 0.6, accY - spacing * 0.2 + 2);
       ctx.lineTo(accX + w * 0.6, accY - spacing * 0.2 - 2);
       ctx.moveTo(accX - w * 0.6, accY + spacing * 0.2 + 2);
       ctx.lineTo(accX + w * 0.6, accY + spacing * 0.2 - 2);
       ctx.stroke();
-    } else if (note.info.accidental === 'b') {
+    } else if (note.info.accidental === 'b' || note.info.accidental === '♭') {
       // Crisp vector Flat symbol
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = isAlert ? 2.0 : 1.6;
       const h = spacing * 1.1;
       const w = spacing * 0.5;
 
@@ -782,10 +1063,28 @@ export class NotationRenderer {
       ctx.stroke();
 
       // Curved loop
-      ctx.lineWidth = 2.0;
+      ctx.lineWidth = isAlert ? 2.4 : 2.0;
       ctx.beginPath();
       ctx.moveTo(accX - w * 0.3, accY + h * 0.35);
       ctx.bezierCurveTo(accX + w * 0.9, accY + h * 0.2, accX + w * 0.7, accY - h * 0.2, accX - w * 0.3, accY - h * 0.05);
+      ctx.stroke();
+    } else if (note.info.accidental === '♮' || note.info.accidental === 'natural') {
+      // Crisp vector Natural symbol
+      ctx.lineWidth = isAlert ? 1.8 : 1.4;
+      const w = spacing * 0.44;
+      const h = spacing * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(accX - w / 2, accY - h / 2);
+      ctx.lineTo(accX - w / 2, accY + h * 0.2);
+      ctx.moveTo(accX + w / 2, accY - h * 0.2);
+      ctx.lineTo(accX + w / 2, accY + h / 2);
+      ctx.stroke();
+      ctx.lineWidth = isAlert ? 2.4 : 2.0;
+      ctx.beginPath();
+      ctx.moveTo(accX - w / 2, accY - h * 0.18);
+      ctx.lineTo(accX + w / 2, accY - h * 0.18 + 2);
+      ctx.moveTo(accX - w / 2, accY + h * 0.18 - 2);
+      ctx.lineTo(accX + w / 2, accY + h * 0.18);
       ctx.stroke();
     }
 
@@ -840,6 +1139,17 @@ export class NotationRenderer {
     ctx.fillStyle = isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.35)';
     ctx.fillText('Middle C (C4)', staffX + staffWidth - 60, middleCY - 6);
 
+    // Interval Contour & Accidental Alert visual legend pill
+    if (this.options.showIntervalContour || this.options.accidentalAlert) {
+      const legendY = trebleBottomY - lineSpacing * 4.6;
+      const legendCenterX = staffX + staffWidth / 2;
+      ctx.setLineDash([]);
+      ctx.font = '600 11px "Inter", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = isDark ? 'rgba(148, 163, 184, 0.7)' : 'rgba(71, 85, 105, 0.75)';
+      ctx.fillText('Intervals:  🟢 Step (2nd)   🟠 Skip (3rd)   🟣 Leap (4th+)   •   Key: ' + (this.options.keySignature || 'C Major') + ' (⚠️ Accidental Alert)', legendCenterX, legendY);
+    }
+
     ctx.restore();
   }
 
@@ -851,6 +1161,7 @@ export class NotationRenderer {
     const playheadX = staffX + 110;
     const speed = this.options.scrollSpeed; // px per second
     const preferFlats = this.options.preferFlats;
+    const keySig = this.options.keySignature || 'C Major';
 
     ctx.save();
 
@@ -864,6 +1175,9 @@ export class NotationRenderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Visible notes collection for interval contour linking
+    const visibleTimelineNotes = [];
+
     // Draw Scrolling notes
     for (let i = this.noteHistory.length - 1; i >= 0; i--) {
       const item = this.noteHistory[i];
@@ -871,11 +1185,8 @@ export class NotationRenderer {
       const durationSec = item.active ? (timestamp - item.startTime) / 1000 : (item.endTime - item.startTime) / 1000;
 
       // X coordinate: note moves left as time advances
-      // Right edge of note bar is at: playheadX + (item.startTime - now) * speed
-      // When active, right edge sits exactly on playheadX!
       const startX = playheadX + (item.active ? 0 : (item.endTime - timestamp) / 1000 * speed);
       const noteWidth = Math.max(lineSpacing * 1.2, durationSec * speed);
-      const x = startX - (item.active ? 0 : 0);
 
       // Stop if scrolled off screen to left
       if (startX + noteWidth < staffX) {
@@ -888,9 +1199,22 @@ export class NotationRenderer {
       const bottomY = clef === 'treble' ? trebleBottomY : bassBottomY;
       const y = bottomY - staffPos * (lineSpacing / 2);
 
+      // Accidental Alert check
+      const accDev = MusicTheory.isAccidentalDeviation(item.midi, keySig);
+      const isAlert = this.options.accidentalAlert && accDev.isDeviation;
+
       // Draw horizontal note bar (duration ribbon)
       const barX = playheadX - timeSinceStart * speed;
       const barW = Math.max(16, durationSec * speed);
+
+      // Collect note center for contour ribbon
+      visibleTimelineNotes.push({
+        midi: item.midi,
+        x: barX + barW * 0.5,
+        y,
+        startTime: item.startTime,
+        active: item.active
+      });
 
       // Draw ledger lines if needed
       this.drawLedgerLines(ctx, barX + barW, staffPos, bottomY, lineSpacing);
@@ -903,12 +1227,18 @@ export class NotationRenderer {
       const ry = y - lineSpacing * 0.35;
       const rh = lineSpacing * 0.7;
 
-      ctx.fillStyle = clef === 'treble' ? 'rgba(56, 189, 248, 0.85)' : 'rgba(192, 132, 252, 0.85)';
-      if (item.active) {
-        ctx.shadowColor = clef === 'treble' ? '#38bdf8' : '#a855f7';
-        ctx.shadowBlur = 10;
+      if (isAlert) {
+        ctx.fillStyle = item.active ? 'rgba(251, 191, 36, 0.95)' : 'rgba(245, 158, 11, 0.85)';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = item.active ? 16 : 8;
       } else {
-        ctx.shadowBlur = 0;
+        ctx.fillStyle = clef === 'treble' ? 'rgba(56, 189, 248, 0.85)' : 'rgba(192, 132, 252, 0.85)';
+        if (item.active) {
+          ctx.shadowColor = clef === 'treble' ? '#38bdf8' : '#a855f7';
+          ctx.shadowBlur = 10;
+        } else {
+          ctx.shadowBlur = 0;
+        }
       }
 
       if (ctx.roundRect) {
@@ -919,13 +1249,24 @@ export class NotationRenderer {
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Note label
+      // Note label & accidental tag
       ctx.font = '600 10px "Inter", sans-serif';
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       if (rw > 28) {
-        ctx.fillText(info.fullName, rx + 6, y);
+        const alertPrefix = isAlert ? '⚠️ ' : '';
+        ctx.fillText(alertPrefix + info.fullName, rx + 6, y);
+      }
+    }
+
+    // Interval contour ribbons between consecutive timeline notes
+    if (this.options.showIntervalContour && visibleTimelineNotes.length >= 2) {
+      const sortedTimeline = [...visibleTimelineNotes].sort((a, b) => a.startTime - b.startTime);
+      for (let k = 0; k < sortedTimeline.length - 1; k++) {
+        const n1 = sortedTimeline[k];
+        const n2 = sortedTimeline[k + 1];
+        this.drawIntervalRibbon(ctx, n1, n2, lineSpacing, 0.65, false);
       }
     }
 
@@ -942,11 +1283,15 @@ export class NotationRenderer {
     this.practiceData = data;
     if (data) {
       this.options.mode = 'practice';
+      if (data.melody && data.melody.key) {
+        this.options.keySignature = data.melody.key;
+      }
     }
 
     if (melodyChanged) {
       this.activeReviewMistakeIndex = -1;
       this.manualScrollOffset = 0;
+      this.clearNotes();
     }
 
     if (becameFinished) {
@@ -957,10 +1302,20 @@ export class NotationRenderer {
         this.notifyReviewNoteChanged();
       }
     }
+
+    this.ensureRenderLoop();
   }
 
   triggerMistakeFlash() {
     this.flashMistakeTimestamp = performance.now();
+  }
+
+  setPlayheadBeats(beats) {
+    this.playheadBeats = beats;
+  }
+
+  triggerRecoveryFlash() {
+    this.flashRecoveryTimestamp = performance.now();
   }
 
   /**
@@ -1036,7 +1391,7 @@ export class NotationRenderer {
 
       // Accidental
       if (info.accidental) {
-        this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: true, clef }, lineSpacing, 1.0);
+        this.drawAccidental(ctx, { x: noteX, y: noteY, midi, info, active: true, clef }, lineSpacing, 1.0);
       }
 
       // Active pitch tag
@@ -1306,8 +1661,39 @@ export class NotationRenderer {
     const totalMelodyWidth = noteXPositions.length > 0 ? (noteXPositions[noteXPositions.length - 1] - notesStartX + 120) : availableWidth;
     let scrollX = 0;
 
+    const isTimeDriven = (this.practiceData.mode === 'tempo' || this.practiceData.mode === 'strict' || this.practiceData.mode === 'first_read');
+    const playheadBeats = (this.practiceData.playheadBeats !== undefined) ? this.practiceData.playheadBeats : (this.playheadBeats || 0);
+
+    // Interpolate raw X position for any musical beat along score timeline
+    const getXForBeat = (targetBeats) => {
+      if (noteXPositions.length === 0) return notesStartX + 20;
+      let beatAcc = 0;
+      for (let i = 0; i < melody.notes.length; i++) {
+        const n = melody.notes[i];
+        const nStart = beatAcc;
+        const nEnd = beatAcc + (n.duration || 1);
+        if (targetBeats >= nStart && targetBeats <= nEnd) {
+          const frac = (targetBeats - nStart) / Math.max(0.01, n.duration || 1);
+          const curX = noteXPositions[i];
+          const nextX = (i + 1 < noteXPositions.length) ? noteXPositions[i + 1] : (curX + 80);
+          return curX + frac * (nextX - curX);
+        }
+        beatAcc = nEnd;
+      }
+      if (targetBeats > beatAcc) {
+        return noteXPositions[noteXPositions.length - 1] + (targetBeats - beatAcc) * 60;
+      }
+      return noteXPositions[0];
+    };
+
+    const playheadXRaw = getXForBeat(playheadBeats);
+
     if (totalMelodyWidth > availableWidth) {
-      if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
+      if (isTimeDriven && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
+        // Continuous smooth auto-scrolling locked to the marching playhead
+        const focusX = notesStartX + availableWidth * 0.28;
+        scrollX = Math.max(0, playheadXRaw - focusX);
+      } else if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
         const mistakeX = noteXPositions[this.activeReviewMistakeIndex];
         const focusX = notesStartX + availableWidth * 0.38;
         scrollX = Math.max(0, mistakeX - focusX);
@@ -1321,8 +1707,14 @@ export class NotationRenderer {
     }
 
     // Apply manual drag / wheel offset
+    if (isNaN(this.manualScrollOffset)) {
+      this.manualScrollOffset = 0;
+    }
     const maxScrollLimit = Math.max(0, totalMelodyWidth - availableWidth + 40);
     scrollX = Math.max(0, Math.min(maxScrollLimit, scrollX + this.manualScrollOffset));
+    if (isNaN(scrollX)) {
+      scrollX = 0;
+    }
 
     const labelBaselineY = bassBottomY + lineSpacing * 1.05;
 
@@ -1387,6 +1779,31 @@ export class NotationRenderer {
       }
       ctx.restore();
     });
+
+    // 5.5 Optional Interval Contour Ribbons across practice score
+    if (this.options.showIntervalContour && melody.notes.length >= 2) {
+      for (let i = 0; i < melody.notes.length - 1; i++) {
+        const n1 = melody.notes[i];
+        const n2 = melody.notes[i + 1];
+        const x1 = noteXPositions[i] - scrollX;
+        const x2 = noteXPositions[i + 1] - scrollX;
+
+        // Only draw for visible notes on screen
+        if (x2 >= notesStartX - 40 && x1 <= staffRightX + 40) {
+          const info1 = MusicTheory.getNoteInfo(n1.midi, preferFlats);
+          const clef1 = n1.midi >= this.options.splitPoint ? 'treble' : 'bass';
+          const pos1 = MusicTheory.getStaffPosition(info1.diatonicStep, clef1);
+          const y1 = (clef1 === 'treble' ? trebleBottomY : bassBottomY) - pos1 * (lineSpacing / 2);
+
+          const info2 = MusicTheory.getNoteInfo(n2.midi, preferFlats);
+          const clef2 = n2.midi >= this.options.splitPoint ? 'treble' : 'bass';
+          const pos2 = MusicTheory.getStaffPosition(info2.diatonicStep, clef2);
+          const y2 = (clef2 === 'treble' ? trebleBottomY : bassBottomY) - pos2 * (lineSpacing / 2);
+
+          this.drawIntervalRibbon(ctx, { x: x1, y: y1, midi: n1.midi }, { x: x2, y: y2, midi: n2.midi }, lineSpacing, 0.45, false);
+        }
+      }
+    }
 
     // 6. Render Melody Notes & Mistake Feedback
     melody.notes.forEach((note, i) => {
@@ -1630,7 +2047,7 @@ export class NotationRenderer {
 
       // Accidental
       if (info.accidental) {
-        this.drawAccidental(ctx, { x: noteX, y: noteY, info, active: isTarget || isReviewActive, clef }, lineSpacing, 1.0);
+        this.drawAccidental(ctx, { x: noteX, y: noteY, midi: note.midi, info, active: isTarget || isReviewActive, clef }, lineSpacing, 1.0);
       }
 
       // Pitch Name Label Lane
@@ -1862,6 +2279,273 @@ export class NotationRenderer {
         ctx.restore();
       }
     });
+
+    // 8.5 Render The Vanishing Bar (Working Memory Buffer Drill)
+    if (this.options.disrupterMode === 'vanishing_bar' && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing && barlineXPositions.length > 0) {
+      const activeMeasure = Math.floor(Math.max(0, playheadBeats) / beatsPerMeasure);
+      const totalMeasures = barlineXPositions.length;
+
+      for (let m = 0; m <= activeMeasure && m < totalMeasures; m++) {
+        const mStartRaw = (m === 0) ? (notesStartX - 4) : barlineXPositions[m - 1];
+        const mEndRaw = barlineXPositions[m];
+        const mStartX = mStartRaw - scrollX;
+        const mEndX = mEndRaw - scrollX;
+        const mW = mEndX - mStartX;
+
+        if (mEndX < notesStartX - 20 || mStartX > staffRightX + 20) continue;
+
+        ctx.save();
+        const maskY = trebleTopY - 14;
+        const maskH = (bassBottomY - trebleTopY) + 28;
+        const isActiveBar = (m === activeMeasure);
+
+        if (isActiveBar) {
+          ctx.fillStyle = isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(241, 245, 249, 0.93)';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([5, 3]);
+        } else {
+          ctx.fillStyle = isDark ? 'rgba(15, 23, 42, 0.82)' : 'rgba(241, 245, 249, 0.82)';
+          ctx.strokeStyle = isDark ? 'rgba(51, 65, 85, 0.55)' : 'rgba(203, 213, 225, 0.55)';
+          ctx.lineWidth = 1.0;
+        }
+
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(mStartX, maskY, mW, maskH, 6);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillRect(mStartX, maskY, mW, maskH);
+          ctx.strokeRect(mStartX, maskY, mW, maskH);
+        }
+        ctx.setLineDash([]);
+
+        if (isActiveBar && mW > 60) {
+          const badgeW = Math.min(mW - 12, 180);
+          const badgeH = 20;
+          const badgeX = mStartX + (mW - badgeW) / 2;
+          const badgeY = trebleTopY - 26;
+
+          ctx.fillStyle = '#0f172a';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.2;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+            ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+          }
+
+          ctx.font = '800 9px "Inter", sans-serif';
+          ctx.fillStyle = '#fbbf24';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`🧠 BUFFER BAR ${m + 1} (PLAY FROM MEMORY)`, badgeX + badgeW / 2, badgeY + badgeH / 2);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    // 8.6 Render The Advance Curtain (No-Lingering Shutter)
+    if (this.options.disrupterMode === 'advance_curtain' && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
+      const curtainX = playheadXRaw - scrollX;
+      if (curtainX > notesStartX) {
+        ctx.save();
+        const maskY = trebleTopY - 14;
+        const maskH = (bassBottomY - trebleTopY) + 28;
+        const curtainLeft = notesStartX - 6;
+        const curtainWidth = Math.max(0, curtainX - curtainLeft);
+
+        const curtainGrad = ctx.createLinearGradient(curtainLeft, 0, curtainX, 0);
+        curtainGrad.addColorStop(0, isDark ? 'rgba(2, 6, 23, 0.96)' : 'rgba(248, 250, 252, 0.96)');
+        curtainGrad.addColorStop(0.85, isDark ? 'rgba(15, 23, 42, 0.93)' : 'rgba(241, 245, 249, 0.93)');
+        curtainGrad.addColorStop(1.0, isDark ? 'rgba(30, 41, 59, 0.90)' : 'rgba(226, 232, 240, 0.90)');
+
+        ctx.fillStyle = curtainGrad;
+        ctx.fillRect(curtainLeft, maskY, curtainWidth, maskH);
+
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(curtainX, maskY);
+        ctx.lineTo(curtainX, maskY + maskH);
+        ctx.stroke();
+
+        const badgeW = 76;
+        const badgeH = 18;
+        const badgeX = curtainX - badgeW;
+        const badgeY = trebleTopY - 24;
+
+        if (badgeX > curtainLeft) {
+          ctx.fillStyle = '#0f172a';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.0;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+            ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+          }
+          ctx.font = '800 8.5px "Inter", sans-serif';
+          ctx.fillStyle = '#fbbf24';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('⛔ NO LINGER', badgeX + badgeW / 2, badgeY + badgeH / 2);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    // 9. Render Decoupled Eye Cursor (Look-Ahead Pacing Guide: 1 Measure Ahead)
+    if (this.options.decoupledEyeCursor && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
+      const eyeBeats = playheadBeats + beatsPerMeasure;
+      const eyeXRaw = getXForBeat(eyeBeats);
+      const eyeX = eyeXRaw - scrollX;
+
+      if (eyeX >= notesStartX - 10 && eyeX <= staffRightX + 10) {
+        ctx.save();
+        const eyeColor = '#38bdf8'; // Electric Sky 400
+
+        // Wide aura beam
+        ctx.beginPath();
+        ctx.rect(eyeX - 10, trebleTopY - 14, 20, (bassBottomY - trebleTopY) + 28);
+        const grad = ctx.createLinearGradient(eyeX - 10, 0, eyeX + 10, 0);
+        grad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+        grad.addColorStop(0.5, 'rgba(56, 189, 248, 0.32)');
+        grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Eye Cursor dashed vertical guideline
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = eyeColor;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(eyeX, trebleTopY - 10);
+        ctx.lineTo(eyeX, bassBottomY + 10);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Top pointer cap (downward triangle)
+        const capY = trebleTopY - 12;
+        ctx.fillStyle = eyeColor;
+        ctx.beginPath();
+        ctx.moveTo(eyeX, capY + 8);
+        ctx.lineTo(eyeX - 6, capY);
+        ctx.lineTo(eyeX + 6, capY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Bottom pointer cap (upward triangle)
+        const bCapY = bassBottomY + 12;
+        ctx.beginPath();
+        ctx.moveTo(eyeX, bCapY - 8);
+        ctx.lineTo(eyeX - 5, bCapY);
+        ctx.lineTo(eyeX + 5, bCapY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Top Eye Banner Badge
+        const eyeBadgeW = 86;
+        const eyeBadgeH = 20;
+        const eyeBadgeX = eyeX - eyeBadgeW / 2;
+        const eyeBadgeY = trebleTopY - 32;
+
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = eyeColor;
+        ctx.lineWidth = 1.2;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(eyeBadgeX, eyeBadgeY, eyeBadgeW, eyeBadgeH, 4);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillRect(eyeBadgeX, eyeBadgeY, eyeBadgeW, eyeBadgeH);
+          ctx.strokeRect(eyeBadgeX, eyeBadgeY, eyeBadgeW, eyeBadgeH);
+        }
+        ctx.font = '800 10px "Inter", sans-serif';
+        ctx.fillStyle = '#7dd3fc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('👁 LOOK HERE', eyeX, eyeBadgeY + eyeBadgeH / 2);
+
+        ctx.restore();
+      }
+    }
+
+    // 10. Render Audio Playhead Cursor (Time-Driven Modes: In-Tempo, Strict & First-Read)
+    if (isTimeDriven && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
+      const playheadX = playheadXRaw - scrollX;
+      if (playheadX >= notesStartX - 10 && playheadX <= staffRightX + 10) {
+        ctx.save();
+
+        const isRecoveryActive = this.flashRecoveryTimestamp && (timestamp - this.flashRecoveryTimestamp < 700);
+        const isDimmed = this.options.decoupledEyeCursor; // Dim audio playhead if eye cursor is guiding user
+        const cursorColor = isRecoveryActive ? '#10b981' : '#38bdf8';
+
+        if (isDimmed) {
+          ctx.globalAlpha = 0.38;
+        }
+
+        // Wide aura glow beam
+        ctx.beginPath();
+        ctx.rect(playheadX - 8, trebleTopY - 14, 16, (bassBottomY - trebleTopY) + 28);
+        const grad = ctx.createLinearGradient(playheadX - 8, 0, playheadX + 8, 0);
+        grad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+        grad.addColorStop(0.5, isRecoveryActive ? 'rgba(16, 185, 129, 0.40)' : (isDimmed ? 'rgba(56, 189, 248, 0.15)' : 'rgba(56, 189, 248, 0.28)'));
+        grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Sharp playhead line
+        ctx.lineWidth = isDimmed ? 1.4 : 2.4;
+        ctx.strokeStyle = cursorColor;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, trebleTopY - 10);
+        ctx.lineTo(playheadX, bassBottomY + 10);
+        ctx.stroke();
+
+        // Top pointer cap (downward triangle)
+        const capY = trebleTopY - 12;
+        ctx.fillStyle = cursorColor;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, capY + 8);
+        ctx.lineTo(playheadX - (isDimmed ? 4 : 6), capY);
+        ctx.lineTo(playheadX + (isDimmed ? 4 : 6), capY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Bottom pointer cap (upward triangle)
+        const bCapY = bassBottomY + 12;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, bCapY - 8);
+        ctx.lineTo(playheadX - (isDimmed ? 3 : 5), bCapY);
+        ctx.lineTo(playheadX + (isDimmed ? 3 : 5), bCapY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Recovery Flash Banner Badge if triggered
+        if (isRecoveryActive) {
+          const recY = trebleTopY - 26;
+          ctx.font = '800 10.5px "Inter", sans-serif';
+          ctx.fillStyle = '#10b981';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('⚡ IN-TEMPO RECOVERY!', playheadX, recY);
+        }
+
+        ctx.restore();
+      }
+    }
 
     ctx.restore(); // end clip
   }

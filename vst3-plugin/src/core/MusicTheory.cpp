@@ -180,4 +180,131 @@ DetectedChord MusicTheory::detectChord(const std::vector<int>& activeMidiNotes, 
     return result;
 }
 
+KeySignature KeySignature::getCMajor()
+{
+    return { "C Major", 0, (1 << 0) | (1 << 2) | (1 << 4) | (1 << 5) | (1 << 7) | (1 << 9) | (1 << 11) };
+}
+
+KeySignature KeySignature::getGMajor()
+{
+    return { "G Major", 1, (1 << 7) | (1 << 9) | (1 << 11) | (1 << 0) | (1 << 2) | (1 << 4) | (1 << 6) };
+}
+
+KeySignature KeySignature::getDMajor()
+{
+    return { "D Major", 2, (1 << 2) | (1 << 4) | (1 << 6) | (1 << 7) | (1 << 9) | (1 << 11) | (1 << 1) };
+}
+
+KeySignature KeySignature::getAMajor()
+{
+    return { "A Major", 3, (1 << 9) | (1 << 11) | (1 << 1) | (1 << 2) | (1 << 4) | (1 << 6) | (1 << 8) };
+}
+
+KeySignature KeySignature::getEMajor()
+{
+    return { "E Major", 4, (1 << 4) | (1 << 6) | (1 << 8) | (1 << 9) | (1 << 11) | (1 << 1) | (1 << 3) };
+}
+
+KeySignature KeySignature::getFMajor()
+{
+    return { "F Major", -1, (1 << 5) | (1 << 7) | (1 << 9) | (1 << 10) | (1 << 0) | (1 << 2) | (1 << 4) };
+}
+
+KeySignature KeySignature::getBbMajor()
+{
+    return { "Bb Major", -2, (1 << 10) | (1 << 0) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 9) };
+}
+
+KeySignature KeySignature::getEbMajor()
+{
+    return { "Eb Major", -3, (1 << 3) | (1 << 5) | (1 << 7) | (1 << 8) | (1 << 10) | (1 << 0) | (1 << 2) };
+}
+
+KeySignature KeySignature::getAMinor()
+{
+    auto key = getCMajor();
+    key.name = "A Minor";
+    return key;
+}
+
+KeySignature KeySignature::getDMinor()
+{
+    auto key = getFMajor();
+    key.name = "D Minor";
+    return key;
+}
+
+KeySignature KeySignature::getEMinor()
+{
+    auto key = getGMajor();
+    key.name = "E Minor";
+    return key;
+}
+
+KeySignature KeySignature::getByKeyName(const juce::String& keyName)
+{
+    if (keyName.containsIgnoreCase("G Major")) return getGMajor();
+    if (keyName.containsIgnoreCase("D Major")) return getDMajor();
+    if (keyName.containsIgnoreCase("A Major")) return getAMajor();
+    if (keyName.containsIgnoreCase("E Major")) return getEMajor();
+    if (keyName.containsIgnoreCase("F Major")) return getFMajor();
+    if (keyName.containsIgnoreCase("Bb Major") || keyName.containsIgnoreCase("B-Flat")) return getBbMajor();
+    if (keyName.containsIgnoreCase("Eb Major") || keyName.containsIgnoreCase("E-Flat")) return getEbMajor();
+    if (keyName.containsIgnoreCase("A Minor")) return getAMinor();
+    if (keyName.containsIgnoreCase("D Minor")) return getDMinor();
+    if (keyName.containsIgnoreCase("E Minor")) return getEMinor();
+    return getCMajor();
+}
+
+IntervalInfo MusicTheory::classifyInterval(int midi1, int midi2, bool preferFlats)
+{
+    const int semitones = std::abs(midi2 - midi1);
+    const auto info1 = getNoteInfo(midi1, preferFlats);
+    const auto info2 = getNoteInfo(midi2, preferFlats);
+    const int stepDist = std::abs(info2.diatonicStep - info1.diatonicStep);
+
+    if (semitones == 0)
+    {
+        return {
+            IntervalCategory::Unison, 0, 0,
+            "1st", "Unison",
+            juce::Colour(0xFF38BDF8), juce::Colour(0x6638BDF8)
+        };
+    }
+    else if (stepDist == 1 || semitones <= 2)
+    {
+        // Step (2nd): Emerald Green
+        return {
+            IntervalCategory::Step, semitones, 1,
+            "2nd", "Step (2nd)",
+            juce::Colour(0xFF22C55E), juce::Colour(0x6622C55E)
+        };
+    }
+    else if (stepDist == 2 || (semitones >= 3 && semitones <= 4))
+    {
+        // Skip (3rd): Vivid Orange
+        return {
+            IntervalCategory::Skip, semitones, 2,
+            "3rd", "Skip (3rd)",
+            juce::Colour(0xFFF97316), juce::Colour(0x66F97316)
+        };
+    }
+    else
+    {
+        // Leap: Royal Purple
+        juce::String label = juce::String(stepDist + 1) + "th";
+        if (stepDist == 3 || semitones == 5) label = "4th";
+        else if (stepDist == 4 || semitones == 7) label = "5th";
+        else if (stepDist == 5 || semitones == 9) label = "6th";
+        else if (stepDist == 6 || semitones == 11) label = "7th";
+        else if (stepDist == 7 || semitones == 12) label = "8ve";
+
+        return {
+            IntervalCategory::Leap, semitones, stepDist,
+            label, "Leap (" + label + ")",
+            juce::Colour(0xFFA855F7), juce::Colour(0x66A855F7)
+        };
+    }
+}
+
 } // namespace MidiSheet

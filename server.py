@@ -38,13 +38,12 @@ class DualStackServer(http.server.ThreadingHTTPServer):
         super().server_bind()
 
 if __name__ == '__main__':
-    # Listen on all interfaces
+    # Listen on all interfaces with ThreadingHTTPServer
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
     try:
-        httpd = DualStackServer(("", PORT), NoCacheHandler)
-    except Exception:
-        # Fallback to standard IPv4
-        http.server.ThreadingHTTPServer.allow_reuse_address = True
         httpd = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), NoCacheHandler)
+    except Exception:
+        httpd = DualStackServer(("", PORT), NoCacheHandler)
 
     print(f"MidiSheet server running at http://localhost:{PORT}/ and http://127.0.0.1:{PORT}/")
     sys.stdout.flush()

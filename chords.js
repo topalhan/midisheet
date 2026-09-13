@@ -65,6 +65,25 @@ const CHORD_FORMULAS = [
   { name: '5 (Power)', suffix: '5', intervals: [0, 7], quality: '5th' }
 ];
 
+// Key Signatures definitions with diatonic pitch classes and accidentals
+export const KEY_SIGNATURES = {
+  'C Major': { name: 'C Major', type: 'major', accidentals: 0, sharps: [], flats: [], diatonicPitchClasses: [0, 2, 4, 5, 7, 9, 11] },
+  'G Major': { name: 'G Major', type: 'major', accidentals: 1, sharps: ['F#'], flats: [], diatonicPitchClasses: [7, 9, 11, 0, 2, 4, 6] },
+  'D Major': { name: 'D Major', type: 'major', accidentals: 2, sharps: ['F#', 'C#'], flats: [], diatonicPitchClasses: [2, 4, 6, 7, 9, 11, 1] },
+  'A Major': { name: 'A Major', type: 'major', accidentals: 3, sharps: ['F#', 'C#', 'G#'], flats: [], diatonicPitchClasses: [9, 11, 1, 2, 4, 6, 8] },
+  'E Major': { name: 'E Major', type: 'major', accidentals: 4, sharps: ['F#', 'C#', 'G#', 'D#'], flats: [], diatonicPitchClasses: [4, 6, 8, 9, 11, 1, 3] },
+  'B Major': { name: 'B Major', type: 'major', accidentals: 5, sharps: ['F#', 'C#', 'G#', 'D#', 'A#'], flats: [], diatonicPitchClasses: [11, 1, 3, 4, 6, 8, 10] },
+  'F Major': { name: 'F Major', type: 'major', accidentals: 1, sharps: [], flats: ['Bb'], diatonicPitchClasses: [5, 7, 9, 10, 0, 2, 4] },
+  'Bb Major': { name: 'Bb Major', type: 'major', accidentals: 2, sharps: [], flats: ['Bb', 'Eb'], diatonicPitchClasses: [10, 0, 2, 3, 5, 7, 9] },
+  'Eb Major': { name: 'Eb Major', type: 'major', accidentals: 3, sharps: [], flats: ['Bb', 'Eb', 'Ab'], diatonicPitchClasses: [3, 5, 7, 8, 10, 0, 2] },
+  'Ab Major': { name: 'Ab Major', type: 'major', accidentals: 4, sharps: [], flats: ['Bb', 'Eb', 'Ab', 'Db'], diatonicPitchClasses: [8, 10, 0, 1, 3, 5, 7] },
+  'A Minor': { name: 'A Minor', type: 'minor', accidentals: 0, sharps: [], flats: [], diatonicPitchClasses: [9, 11, 0, 2, 4, 5, 7] },
+  'E Minor': { name: 'E Minor', type: 'minor', accidentals: 1, sharps: ['F#'], flats: [], diatonicPitchClasses: [4, 6, 7, 9, 11, 0, 2] },
+  'D Minor': { name: 'D Minor', type: 'minor', accidentals: 1, sharps: [], flats: ['Bb'], diatonicPitchClasses: [2, 4, 5, 7, 9, 10, 0] },
+  'D Dorian': { name: 'D Dorian', type: 'modal', accidentals: 0, sharps: [], flats: [], diatonicPitchClasses: [2, 4, 5, 7, 9, 11, 0] }
+};
+
+
 export class MusicTheory {
   /**
    * Convert MIDI note number to note details
@@ -72,20 +91,25 @@ export class MusicTheory {
    * @param {boolean} preferFlats - whether to use flats instead of sharps
    */
   static getNoteInfo(midi, preferFlats = false) {
-    const pitchClass = ((midi % 12) + 12) % 12;
-    const octave = Math.floor(midi / 12) - 1;
+    if (typeof midi !== 'number' || isNaN(midi) || !isFinite(midi)) {
+      midi = 60;
+    }
+    const safeMidi = Math.max(0, Math.min(127, Math.round(midi)));
+    const pitchClass = ((safeMidi % 12) + 12) % 12;
+    const octave = Math.floor(safeMidi / 12) - 1;
     const nameMap = preferFlats ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP;
     const diatonicMap = preferFlats ? CHROMATIC_TO_DIATONIC_FLAT : CHROMATIC_TO_DIATONIC_SHARP;
 
-    const baseInfo = diatonicMap[pitchClass];
-    const letter = baseInfo.letter;
-    const accidental = baseInfo.acc;
-    const fullName = `${nameMap[pitchClass]}${octave}`;
-    const displayName = `${nameMap[pitchClass]}`;
+    const baseInfo = diatonicMap[pitchClass] || { letter: 'C', acc: '' };
+    const letter = baseInfo.letter || 'C';
+    const accidental = baseInfo.acc || '';
+    const fullName = `${nameMap[pitchClass] || 'C'}${octave}`;
+    const displayName = `${nameMap[pitchClass] || 'C'}`;
 
     // Calculate total diatonic step index (C0 = 0)
     // C0 is octave 0, step 0.
-    const diatonicStep = octave * 7 + DIATONIC_STEPS[letter];
+    const stepOffset = DIATONIC_STEPS[letter] !== undefined ? DIATONIC_STEPS[letter] : 0;
+    const diatonicStep = octave * 7 + stepOffset;
 
     // Middle C is C4 = MIDI 60 -> octave 4, diatonic 'C' = 0 -> step = 28
     // Treble bottom line is E4 -> octave 4, diatonic 'E' = 2 -> step = 30
@@ -93,10 +117,10 @@ export class MusicTheory {
 
     // Staff clef determination:
     // Middle C (60) and above defaults to Treble; below 60 to Bass
-    const clef = midi >= 60 ? 'treble' : 'bass';
+    const clef = safeMidi >= 60 ? 'treble' : 'bass';
 
     return {
-      midi,
+      midi: safeMidi,
       pitchClass,
       octave,
       letter,
@@ -105,7 +129,7 @@ export class MusicTheory {
       displayName,
       diatonicStep,
       clef,
-      frequency: 440 * Math.pow(2, (midi - 69) / 12)
+      frequency: 440 * Math.pow(2, (safeMidi - 69) / 12)
     };
   }
 
@@ -230,5 +254,137 @@ export class MusicTheory {
     }
 
     return bestMatch;
+  }
+
+  /**
+   * Get Key Signature details by name
+   */
+  static getKeySignature(name = 'C Major') {
+    return KEY_SIGNATURES[name] || KEY_SIGNATURES['C Major'];
+  }
+
+  /**
+   * Determine if a MIDI note is diatonic or an accidental deviation from the key signature.
+   * E.g. In C Major, C/D/E/F/G/A/B are diatonic, while C#, Eb, F#, etc. deviate.
+   * In G Major, F# is diatonic (muscle memory default), while F natural is a deviation.
+   */
+  static isAccidentalDeviation(midi, keySignatureName = 'C Major') {
+    if (typeof midi !== 'number' || isNaN(midi) || !isFinite(midi)) {
+      return {
+        isDiatonic: true,
+        isDeviation: false,
+        printedAccidental: '',
+        pitchClass: 0,
+        noteInfo: this.getNoteInfo(60),
+        keySignature: this.getKeySignature(keySignatureName)
+      };
+    }
+    const safeMidi = Math.max(0, Math.min(127, Math.round(midi)));
+    const key = this.getKeySignature(keySignatureName);
+    const pitchClass = ((safeMidi % 12) + 12) % 12;
+    const isDiatonic = key.diatonicPitchClasses.includes(pitchClass);
+
+    // Prefer flats for flat keys
+    const preferFlats = key.flats.length > 0;
+    const noteInfo = this.getNoteInfo(safeMidi, preferFlats);
+
+    // Accidental printed status
+    let isDeviation = false;
+    let printedAccidental = '';
+
+    if (!isDiatonic) {
+      isDeviation = true;
+      printedAccidental = noteInfo.accidental || (preferFlats ? 'b' : '#');
+    } else {
+      // It is diatonic. Check if the key signature itself has an accidental for this letter.
+      // E.g., in G Major, F has a sharp in the key signature.
+      // If someone played an F natural, that would be !isDiatonic (pitchClass 5 vs 6) so isDeviation=true and printedAccidental='♮'.
+      if (key.sharps.some(s => s.startsWith(noteInfo.letter))) {
+        printedAccidental = '#';
+      } else if (key.flats.some(f => f.startsWith(noteInfo.letter))) {
+        printedAccidental = 'b';
+      }
+    }
+
+    return {
+      isDiatonic,
+      isDeviation,
+      printedAccidental,
+      pitchClass,
+      noteInfo,
+      keySignature: key
+    };
+  }
+
+  /**
+   * Classify relative motion / interval between two MIDI notes:
+   * - Step (2nd): 1 to 2 semitones -> Green
+   * - Skip (3rd): 3 to 4 semitones -> Orange
+   * - Leap (4th, 5th, 6th, Octave+): 5+ semitones -> Purple
+   * - Unison: 0 semitones -> Cyan
+   */
+  static classifyInterval(midi1, midi2, preferFlats = false) {
+    const semitones = Math.abs(midi2 - midi1);
+    const info1 = this.getNoteInfo(midi1, preferFlats);
+    const info2 = this.getNoteInfo(midi2, preferFlats);
+    const stepDist = Math.abs(info2.diatonicStep - info1.diatonicStep);
+
+    if (semitones === 0) {
+      return {
+        category: 'unison',
+        type: 'unison',
+        semitones: 0,
+        steps: 0,
+        shortLabel: '1st',
+        label: 'Unison',
+        color: '#38bdf8',
+        rgba: 'rgba(56, 189, 248, 0.7)',
+        glow: '#38bdf8'
+      };
+    } else if (stepDist === 1 || semitones <= 2) {
+      return {
+        category: 'step',
+        type: 'step',
+        semitones,
+        steps: 1,
+        shortLabel: '2nd',
+        label: 'Step (2nd)',
+        color: '#22c55e', // Emerald Green
+        rgba: 'rgba(34, 197, 94, 0.75)',
+        glow: '#22c55e'
+      };
+    } else if (stepDist === 2 || (semitones >= 3 && semitones <= 4)) {
+      return {
+        category: 'skip',
+        type: 'skip',
+        semitones,
+        steps: 2,
+        shortLabel: '3rd',
+        label: 'Skip (3rd)',
+        color: '#f97316', // Vibrant Orange
+        rgba: 'rgba(249, 115, 22, 0.85)',
+        glow: '#f97316'
+      };
+    } else {
+      let shortLabel = `${stepDist + 1}th`;
+      if (stepDist === 3 || semitones === 5) shortLabel = '4th';
+      else if (stepDist === 4 || semitones === 7) shortLabel = '5th';
+      else if (stepDist === 5 || semitones === 9) shortLabel = '6th';
+      else if (stepDist === 6 || semitones === 11) shortLabel = '7th';
+      else if (stepDist === 7 || semitones === 12) shortLabel = '8ve';
+      else if (stepDist > 7) shortLabel = `${stepDist + 1}th`;
+
+      return {
+        category: 'leap',
+        type: 'leap',
+        semitones,
+        steps: stepDist,
+        shortLabel,
+        label: `Leap (${shortLabel})`,
+        color: '#a855f7', // Vivid Purple
+        rgba: 'rgba(168, 85, 247, 0.85)',
+        glow: '#a855f7'
+      };
+    }
   }
 }

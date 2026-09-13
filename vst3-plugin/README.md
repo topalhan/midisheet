@@ -6,8 +6,14 @@ A cross-platform **Real-Time MIDI Grand Staff Sheet Music & Melody Practice Scor
 
 ## What It Does
 - **Zero-Latency MIDI Pass-Through**: Consumes live MIDI keyboard / EWI input and passes events directly to subsequent synthesizers or virtual instruments (Vital, Kontakt, Pianoteq, Odin 2, etc.) with 0 samples of added latency.
-- **Interactive Grand Staff Notation**: Real-time treble and bass clef notation showing active notes with accidental spelling and pitch names.
-- **Melody Practice & Accuracy Scorer**: Built-in library of 10 classic practice melodies with real-time rhythm timing feedback (Perfect, Early, Late), streak counter, and scorecard assessment.
+- **Interactive Grand Staff Notation**: Real-time treble and bass clef notation showing active notes with accidental spelling, pitch names, and classical vector engraving.
+- **Melody Practice & Accuracy Scorer**: Built-in library of classic practice melodies with real-time rhythm timing feedback (tight 65ms/150ms thresholds), streak counter, and scorecard assessment.
+- **Multiple Practice Modes**:
+  - *Wait for Note*: Traditional practice mode waiting for correct note strike.
+  - *In-Tempo*: Guided metronome playback.
+  - *Strict Time (No-Pause Metronome)*: Relentless playhead advancing by DAW PPQ / high-resolution audio clock; non-blocking mistake evaluation; downbeat tempo recovery bonus.
+  - *First-Read Lockout Challenge*: 30s silent analysis phase followed by a 4-beat count-in and single-shot evaluation with persistent state lockout.
+- **20-Minute Daily Sight-Reading Master Class Engine**: Integrated 4-Block curriculum controller (`DailyRoutineManager`, `DailyRoutineComponent`) with mechanical calibration, rhythm tap analysis, targeted fix loops, and flash reading.
 - **DAW Host Sync**: Automatically locks to DAW tempo (BPM), time signature, and playhead position.
 
 ---

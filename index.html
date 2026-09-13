@@ -51,6 +51,10 @@
           <span>🎼</span> Melody Trainer
           <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hidden xs:inline">10 Songs</span>
         </button>
+        <button id="tab-routine" class="mode-tab flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all">
+          <span>⏱️</span> Daily Routine
+          <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">20 Min</span>
+        </button>
       </div>
 
       <!-- Quick Status & Action Buttons -->
@@ -110,10 +114,29 @@
     <!-- Melody Trainer HUD (shown when Melody Trainer mode is active) -->
     <div id="practice-hud" class="hidden bg-slate-900/80 border border-sky-500/40 rounded-xl p-3 sm:p-4 flex flex-col gap-3 shadow-lg shadow-sky-950/30 transition-all relative">
       
-      <!-- Animated Count-In Banner (Overlay during Tempo Count-In) -->
+      <!-- Animated Count-In Banner (Overlay during Tempo / Strict Count-In) -->
       <div id="count-in-banner" class="hidden absolute inset-x-0 -top-3 z-30 mx-auto max-w-sm bg-slate-950/95 border-2 border-sky-400 text-center py-2.5 px-5 rounded-2xl shadow-2xl shadow-sky-500/50 backdrop-blur-md transition-all">
         <div class="text-[10px] font-black uppercase tracking-widest text-sky-300">Tempo Count-In • Get Ready!</div>
         <div id="count-in-number" class="text-4xl font-black text-white mt-0.5 animate-bounce">1</div>
+      </div>
+
+      <!-- Silent Analysis Banner (Overlay during First-Read 30s Inspection) -->
+      <div id="silent-analysis-banner" class="hidden absolute inset-x-0 -top-3 z-30 mx-auto max-w-md bg-slate-950/95 border-2 border-amber-400 text-center py-3 px-5 rounded-2xl shadow-2xl shadow-amber-500/40 backdrop-blur-md transition-all">
+        <div class="flex items-center justify-between gap-2 border-b border-amber-500/30 pb-1.5 mb-2">
+          <div class="flex items-center gap-1.5 text-amber-400 text-xs font-black uppercase tracking-wider">
+            <span>👀</span> First-Read Silent Analysis
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="analysis-timer-display" class="font-mono text-base font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-lg border border-amber-500/40">30s</span>
+            <button id="btn-skip-analysis" class="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] transition-colors shadow-sm">
+              ▶️ Ready Now
+            </button>
+          </div>
+        </div>
+        <div class="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800 mb-2">
+          <div id="analysis-progress-bar" class="bg-gradient-to-r from-amber-400 to-emerald-400 h-full rounded-full transition-all duration-300" style="width: 100%"></div>
+        </div>
+        <p class="text-[11px] text-slate-300">Study clefs, key signature, intervals, and rhythm. Audio synthesizer is muted.</p>
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-3">
@@ -197,12 +220,20 @@
             <div id="practice-rhythm-display" class="text-base sm:text-lg font-black text-amber-400">100%</div>
           </div>
 
+          <!-- Tempo Recovery Score Pill (Strict Sight-Reading) -->
+          <div id="practice-recovery-container" class="bg-slate-950/60 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border border-emerald-900/50 text-right hidden">
+            <div class="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Recoveries</div>
+            <div id="practice-recovery-display" class="text-base sm:text-lg font-black text-emerald-300">⚡ 0</div>
+          </div>
+
           <!-- Mode Selector -->
           <div class="flex flex-col gap-0.5">
             <label class="text-[9px] text-slate-400 font-semibold uppercase">Mode</label>
             <select id="select-practice-mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs">
-              <option value="wait">Wait for Note</option>
-              <option value="tempo">In-Tempo</option>
+              <option value="strict" selected>Strict Time (No-Pause)</option>
+              <option value="first_read">First-Read (30s Analysis)</option>
+              <option value="wait">Wait for Note (Practice)</option>
+              <option value="tempo">In-Tempo (Metronome)</option>
             </select>
           </div>
 
@@ -218,6 +249,133 @@
         <span id="practice-progress-text" class="text-[11px] font-mono text-slate-400 min-w-[75px]">Note 1 of 15</span>
         <div class="flex-1 bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
           <div id="practice-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full rounded-full transition-all duration-200" style="width: 7%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 20-Minute Daily Training Routine HUD (shown when Daily Routine mode is active) -->
+    <div id="routine-hud" class="hidden bg-slate-900/90 border border-emerald-500/40 rounded-xl p-3 sm:p-4 flex flex-col gap-3 shadow-xl shadow-emerald-950/30 transition-all relative">
+      
+      <!-- Top Control Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <!-- Routine Branding & Key of the Day -->
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-lg font-black text-emerald-400 shadow-inner">
+            ⏱️
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm sm:text-base font-black text-white tracking-tight">20-Minute Daily Routine</h2>
+              <span id="routine-streak-badge" class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold flex items-center gap-1">
+                🔥 <span id="routine-streak-count">0</span> Day Streak
+              </span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
+              <label for="routine-key-select" class="font-medium text-slate-400">Key of the Day:</label>
+              <select id="routine-key-select" class="bg-slate-800 border border-slate-700 text-emerald-300 font-bold rounded px-2 py-0.5 text-xs focus:ring-emerald-500 focus:border-emerald-500">
+                <option value="C Major" selected>C Major (0)</option>
+                <option value="G Major">G Major (1♯)</option>
+                <option value="F Major">F Major (1♭)</option>
+                <option value="D Major">D Major (2♯)</option>
+                <option value="Bb Major">B♭ Major (2♭)</option>
+                <option value="A Minor">A Minor (0)</option>
+                <option value="D Minor">D Minor (1♭)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Timers Display -->
+        <div class="flex items-center gap-3 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+          <div class="text-right">
+            <div class="text-[9px] uppercase font-bold tracking-wider text-slate-400">Routine Clock</div>
+            <div id="routine-master-timer" class="font-mono text-lg font-black text-emerald-400">00:00 / 20:00</div>
+          </div>
+          <div class="h-7 w-px bg-slate-800"></div>
+          <div class="text-left">
+            <div class="text-[9px] uppercase font-bold tracking-wider text-slate-400">Block Timer</div>
+            <div id="routine-phase-timer" class="font-mono text-lg font-black text-amber-400">02:00</div>
+          </div>
+        </div>
+
+        <!-- Routine Player Controls -->
+        <div class="flex items-center gap-1.5">
+          <button id="btn-routine-prev" title="Previous Exercise" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold transition-colors">
+            ⏮️
+          </button>
+          <button id="btn-routine-play" title="Start/Pause Routine" class="px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all shadow-md shadow-emerald-500/30 flex items-center gap-1.5">
+            <span id="btn-routine-play-icon">▶️</span>
+            <span id="btn-routine-play-text">Start</span>
+          </button>
+          <button id="btn-routine-skip" title="Skip to Next Exercise" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold transition-colors">
+            ⏭️
+          </button>
+          <button id="btn-routine-reset" title="Reset Routine" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors">
+            🔄
+          </button>
+        </div>
+      </div>
+
+      <!-- 4-Block Segmented Curriculum Progress Bar -->
+      <div class="w-full flex flex-col gap-1 pt-1">
+        <div class="grid grid-cols-4 gap-1.5 text-[10px] font-bold text-center">
+          <div id="block-tab-1" class="routine-block-pill active rounded-md py-1 bg-slate-800/90 text-emerald-400 border border-emerald-500/30">
+            1. Mechanical (5m)
+          </div>
+          <div id="block-tab-2" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+            2. Analysis (5m)
+          </div>
+          <div id="block-tab-3" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+            3. Cold Read (7m)
+          </div>
+          <div id="block-tab-4" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+            4. Flash (3m)
+          </div>
+        </div>
+
+        <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+          <div id="routine-master-progressbar" class="bg-gradient-to-r from-emerald-400 via-sky-400 to-amber-400 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Exercise Guidance & Interactive Action Panel -->
+      <div class="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <span id="routine-phase-badge" class="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+              Block 1 • Part 1
+            </span>
+            <h3 id="routine-phase-title" class="text-sm font-bold text-white">
+              Isolated Awkward Pairs (60 BPM)
+            </h3>
+          </div>
+          <p id="routine-phase-instructions" class="text-xs text-slate-300 leading-relaxed">
+            Slur slowly at 60 BPM. Ensure fingers snap down and lift as unified blocks with zero hand tension. Tactile execution without reading pressure.
+          </p>
+        </div>
+
+        <!-- Dynamic Context Panels -->
+        <div id="routine-action-container" class="flex items-center gap-2">
+          <!-- Block 2A Interactive Rhythm Tap Button & Feedback -->
+          <div id="routine-rhythm-tap-box" class="hidden flex items-center gap-2">
+            <button id="btn-routine-tap" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-sky-500/30 active:scale-95 transition-all flex items-center gap-1.5 animate-pulse">
+              <span>👆</span> Tap Rhythm (Space)
+            </button>
+            <div id="routine-tap-feedback" class="text-xs font-bold text-sky-300 font-mono px-2 py-1 bg-sky-950/60 border border-sky-800/60 rounded-lg">
+              Tap with Click!
+            </div>
+          </div>
+
+          <!-- Block 3C Lookahead Badge -->
+          <div id="routine-lookahead-box" class="hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-bold">
+            <span>👁️</span> 1-Measure Eye Buffer Active
+          </div>
+
+          <!-- Block 4 Flash Preview Countdown Banner -->
+          <div id="routine-flash-box" class="hidden flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold">
+            <span>⚡</span>
+            <span>Scan: <strong id="routine-flash-countdown" class="font-mono text-base text-white">10</strong>s</span>
+          </div>
         </div>
       </div>
     </div>
@@ -239,11 +397,70 @@
           ♯ Sharps
         </button>
 
+        <!-- Key Signature Reference -->
+        <div class="flex items-center gap-1.5" title="Scale muscle memory reference: Diatonic notes stay neutral; deviations trigger Accidental Alert">
+          <label class="text-slate-400 font-medium">Key:</label>
+          <select id="select-key-signature" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs font-semibold">
+            <option value="C Major" selected>C Major (0)</option>
+            <option value="G Major">G Major (1♯)</option>
+            <option value="D Major">D Major (2♯)</option>
+            <option value="A Major">A Major (3♯)</option>
+            <option value="E Major">E Major (4♯)</option>
+            <option value="B Major">B Major (5♯)</option>
+            <option value="F Major">F Major (1♭)</option>
+            <option value="Bb Major">B♭ Major (2♭)</option>
+            <option value="Eb Major">E♭ Major (3♭)</option>
+            <option value="Ab Major">A♭ Major (4♭)</option>
+            <option value="A Minor">A Minor (0)</option>
+            <option value="E Minor">E Minor (1♯)</option>
+            <option value="D Minor">D Minor (1♭)</option>
+          </select>
+        </div>
+
+        <!-- Interval Contour Ribbon Toggle -->
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white transition-colors" title="Draw color-coded ribbons between noteheads (Green=Steps, Orange=Skips/3rds, Purple=Leaps) to train contour sight-reading">
+          <input type="checkbox" id="toggle-interval-contour" checked class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+          <span class="flex items-center gap-1 font-medium">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+            Contours
+          </span>
+        </label>
+
+        <!-- Accidental Alert Flash Toggle -->
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white transition-colors" title="Keep diatonic notes neutral, but flash luminous warning halos on notes carrying printed accidentals deviating from key signature">
+          <input type="checkbox" id="toggle-accidental-alert" checked class="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-0">
+          <span class="flex items-center gap-1 font-medium">
+            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block animate-pulse"></span>
+            Accidental Alert
+          </span>
+        </label>
+
         <!-- Note Names Toggle -->
         <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
           <input type="checkbox" id="toggle-note-names" checked class="rounded bg-slate-800 border-slate-700 text-sky-500">
           <span>Show Pitch Labels</span>
         </label>
+
+        <!-- Eye Pacer (+1 Bar) Toggle -->
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white transition-colors" title="Decoupled Eye Cursor: Place a visual pacing cursor 1 measure ahead of playback to guide forward gaze fixation">
+          <input type="checkbox" id="toggle-eye-cursor" class="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-0">
+          <span class="flex items-center gap-1 font-medium text-sky-400">
+            <span>👁</span>
+            Eye Pacer (+1 Bar)
+          </span>
+        </label>
+
+        <!-- Visual Disrupter / Buffer Training Mode -->
+        <div class="flex items-center gap-1.5" title="Visual Disrupter & Buffer Training: Forces reading ahead and buffering notes in working memory">
+          <label class="text-slate-400 font-medium flex items-center gap-1">
+            <span>🧠</span> Disrupter:
+          </label>
+          <select id="select-disrupter-mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs font-semibold">
+            <option value="none" selected>Off (Normal)</option>
+            <option value="vanishing_bar">Vanishing Bar (Memory Buffer)</option>
+            <option value="advance_curtain">Advance Curtain (No Lingering)</option>
+          </select>
+        </div>
       </div>
 
       <!-- Sound Engine Controls -->
@@ -291,6 +508,29 @@
         <div id="audio-latency-badge" class="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-300 cursor-help" title="Web Audio Hardware Buffer Latency">
           <span id="audio-latency-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span id="audio-latency-value">-- ms</span>
+        </div>
+
+        <!-- Hardware Latency Calibration Controls -->
+        <div class="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700/80 rounded px-2 py-1 text-xs" title="Timing Latency Calibration: Compensates for sound card / headphone output delay so notes align to 0ms (Perfect)">
+          <span class="text-[11px] font-semibold text-slate-400 flex items-center gap-1 select-none">
+            <span>🎯</span> Calib:
+          </span>
+          <div class="flex items-center gap-0.5 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 font-mono">
+            <button id="btn-calib-minus" class="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-white rounded hover:bg-slate-800 text-[11px] font-bold select-none" title="Decrease offset by 10ms">-</button>
+            <span id="latency-calib-value" class="text-sky-300 font-bold px-1 select-none min-w-[46px] text-center">0 ms</span>
+            <button id="btn-calib-plus" class="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-white rounded hover:bg-slate-800 text-[11px] font-bold select-none" title="Increase offset by 10ms">+</button>
+          </div>
+          <!-- Quick Presets -->
+          <div class="hidden xl:flex items-center gap-1 pl-0.5">
+            <button class="btn-calib-preset px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700/60 transition-colors" data-offset="0" title="0ms: ASIO / Direct audio interface">0</button>
+            <button class="btn-calib-preset px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700/60 transition-colors" data-offset="60" title="60ms: Low-latency sound card">60</button>
+            <button class="btn-calib-preset px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700/60 transition-colors" data-offset="120" title="120ms: Standard Windows wired headphones">120</button>
+            <button class="btn-calib-preset px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700/60 transition-colors" data-offset="180" title="180ms: Bluetooth wireless headphones">180</button>
+          </div>
+          <!-- Auto Calibrate Button -->
+          <button id="btn-auto-calib" class="px-1.5 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-[10px] font-semibold transition-colors whitespace-nowrap" title="Auto-calibrate offset based on the timing of the last note you played">
+            ⚡ Auto-Sync
+          </button>
         </div>
 
         <!-- Reverb -->
@@ -500,10 +740,23 @@
         </div>
       </div>
 
+      <!-- Official First-Read Certificate Banner -->
+      <div id="score-first-read-cert" class="w-full bg-gradient-to-r from-amber-500/20 via-sky-500/20 to-emerald-500/20 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between text-xs hidden">
+        <div class="flex items-center gap-2 text-left">
+          <span class="text-2xl">🏆</span>
+          <div>
+            <div class="font-black text-amber-300 text-xs uppercase tracking-wider">Official First-Read Certified</div>
+            <div class="text-[11px] text-slate-300">Played once with 30s analysis • Excerpt now locked</div>
+          </div>
+        </div>
+        <span class="px-2 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs">LOCKED</span>
+      </div>
+
       <!-- Rhythm Timing Breakdown Badges -->
       <div id="score-rhythm-breakdown" class="flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold">
         <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" id="score-badge-perfect">🟢 0 Perfect</span>
         <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30" id="score-badge-great">🟡 0 Early/Late</span>
+        <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 hidden" id="score-badge-recoveries">⚡ 0 Recoveries</span>
         <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30" id="score-badge-missed">🔴 0 Missed</span>
       </div>
 
@@ -536,6 +789,48 @@
           </button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Daily Routine Completion Modal -->
+  <div id="modal-routine-complete" class="modal-backdrop">
+    <div class="modal-card max-w-md text-center p-6 flex flex-col items-center gap-4">
+      <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-3xl shadow-xl shadow-emerald-500/30 text-white animate-bounce">
+        🏆
+      </div>
+
+      <div>
+        <span class="text-[10px] uppercase font-bold tracking-wider text-emerald-400">Daily Training Curriculum</span>
+        <h2 class="text-2xl font-black text-white mt-0.5">20-Minute Routine Complete!</h2>
+        <p class="text-xs text-slate-400 mt-0.5">Tactile calibration, analysis, cold sight-reading, and flash reading mastered.</p>
+      </div>
+
+      <!-- Streak & Stats Box -->
+      <div class="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div class="flex items-center gap-2 text-amber-400 font-bold text-sm">
+            <span>🔥</span> Daily Streak
+          </div>
+          <div id="routine-summary-streak" class="text-xl font-black text-amber-300 font-mono">1 Day</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-center">
+          <div class="border-r border-slate-800/80 pr-2">
+            <div class="text-[10px] uppercase font-bold text-slate-400">Total Notes</div>
+            <div id="routine-summary-notes" class="text-2xl font-black text-emerald-400 font-mono">0</div>
+            <div class="text-[11px] text-slate-400 mt-0.5"><span id="routine-summary-accuracy" class="text-emerald-300 font-semibold">100%</span> Accuracy</div>
+          </div>
+          <div class="pl-2">
+            <div class="text-[10px] uppercase font-bold text-slate-400">Downbeat Recoveries</div>
+            <div id="routine-summary-recoveries" class="text-2xl font-black text-sky-400 font-mono">0</div>
+            <div class="text-[11px] text-slate-400 mt-0.5"><span id="routine-summary-recovery-pts" class="text-sky-300 font-semibold">+0</span> bonus pts</div>
+          </div>
+        </div>
+      </div>
+
+      <button id="btn-routine-complete-done" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-emerald-500/20">
+        Awesome, Finish Today's Session!
+      </button>
     </div>
   </div>
 
@@ -637,7 +932,30 @@
           <p class="text-[11px] text-slate-400">Select "No Sound" when playing an EWI or keyboard with internal sounds to avoid hearing two audio streams.</p>
         </div>
 
-        <!-- Section 4: Notation & Display -->
+        <!-- Section 4: Audio Output & Latency Calibration -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
+          <span class="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+            <span>🎯</span> Audio Latency Offset Calibration
+          </span>
+          <p class="text-[11px] text-slate-400">Compensates for sound card buffers and wireless Bluetooth headphone delay so that notes struck on the audible beat score as 0ms (Perfect).</p>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-slate-300">Calibration Offset:</span>
+            <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded px-2 py-1 font-mono">
+              <button id="btn-modal-calib-minus" class="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white rounded hover:bg-slate-800 text-xs font-bold select-none">-</button>
+              <span id="modal-latency-calib-value" class="text-sky-300 font-bold px-1.5 min-w-[50px] text-center select-none">0 ms</span>
+              <button id="btn-modal-calib-plus" class="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white rounded hover:bg-slate-800 text-xs font-bold select-none">+</button>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 pt-1">
+            <span class="text-[11px] text-slate-400">Presets:</span>
+            <button class="btn-calib-preset px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700/60" data-offset="0">0ms (ASIO)</button>
+            <button class="btn-calib-preset px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700/60" data-offset="60">60ms (Wired Low)</button>
+            <button class="btn-calib-preset px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700/60" data-offset="120">120ms (Wired Win)</button>
+            <button class="btn-calib-preset px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700/60" data-offset="180">180ms (Bluetooth)</button>
+          </div>
+        </div>
+
+        <!-- Section 5: Notation & Display -->
         <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
           <span class="font-bold text-slate-200 text-xs flex items-center gap-1.5">
             <span>👁️</span> Display & View Options
@@ -648,6 +966,20 @@
               <span class="text-slate-400 text-[11px]">Live Grand Staff with dedicated INPUT column</span>
             </div>
           </div>
+        </div>
+
+        <!-- Section 5: First-Read Sight-Reading Records -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
+          <span class="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+            <span>🎯</span> First-Read Challenge Records
+          </span>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-slate-300">Reset Completed Lockouts:</span>
+            <button id="btn-reset-first-read" class="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition-colors">
+              Reset Lockouts
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400">Clears historical First-Read records so you can re-test excerpts as brand-new sight-reading challenges.</p>
         </div>
       </div>
 

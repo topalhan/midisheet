@@ -23,17 +23,77 @@ ScoreboardComponent::ScoreboardComponent()
     };
     addAndMakeVisible(restartButton);
 
-    // Mode Selector (Wait vs Tempo)
+    // Mode Selector
     modeSelector.addItem("Wait for Note", 1);
-    modeSelector.addItem("Tempo / On Beat", 2);
+    modeSelector.addItem("In-Tempo (Metronome)", 2);
+    modeSelector.addItem("Strict Time (No-Pause)", 3);
+    modeSelector.addItem("First-Read (30s Lockout)", 4);
     modeSelector.setSelectedId(1, juce::dontSendNotification);
     modeSelector.setColour(juce::ComboBox::backgroundColourId, juce::Colour::fromRGB(30, 41, 59));
     modeSelector.setColour(juce::ComboBox::textColourId, juce::Colour::fromRGB(226, 232, 240));
     modeSelector.onChange = [this]() {
-        const auto mode = (modeSelector.getSelectedId() == 2) ? PracticeMode::Tempo : PracticeMode::Wait;
+        PracticeMode mode = PracticeMode::Wait;
+        switch (modeSelector.getSelectedId())
+        {
+            case 1: mode = PracticeMode::Wait; break;
+            case 2: mode = PracticeMode::Tempo; break;
+            case 3: mode = PracticeMode::StrictTime; break;
+            case 4: mode = PracticeMode::FirstRead; break;
+            default: break;
+        }
         if (onModeChanged) onModeChanged(mode);
     };
     addAndMakeVisible(modeSelector);
+
+    // Visual Disrupter Mode Selector
+    disrupterSelector.addItem("Disrupter: Off", 1);
+    disrupterSelector.addItem("Vanishing Bar", 2);
+    disrupterSelector.addItem("Advance Curtain", 3);
+    disrupterSelector.setSelectedId(1, juce::dontSendNotification);
+    disrupterSelector.setColour(juce::ComboBox::backgroundColourId, juce::Colour::fromRGB(30, 41, 59));
+    disrupterSelector.setColour(juce::ComboBox::textColourId, juce::Colour::fromRGB(226, 232, 240));
+    disrupterSelector.onChange = [this]() {
+        VisualDisrupterMode mode = VisualDisrupterMode::None;
+        switch (disrupterSelector.getSelectedId())
+        {
+            case 1: mode = VisualDisrupterMode::None; break;
+            case 2: mode = VisualDisrupterMode::VanishingBar; break;
+            case 3: mode = VisualDisrupterMode::AdvanceCurtain; break;
+            default: break;
+        }
+        if (onDisrupterModeChanged) onDisrupterModeChanged(mode);
+    };
+    addAndMakeVisible(disrupterSelector);
+
+    // Eye Cursor (+1 Bar) Pacer Button
+    eyeCursorButton.setButtonText(juce::String::fromUTF8("👁 Eye Pacer"));
+    eyeCursorButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(30, 41, 59));
+    eyeCursorButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(148, 163, 184));
+    eyeCursorButton.onClick = [this]() {
+        eyeCursorActive = !eyeCursorActive;
+        setEyeCursorEnabled(eyeCursorActive);
+        if (onEyeCursorToggled) onEyeCursorToggled(eyeCursorActive);
+    };
+    addAndMakeVisible(eyeCursorButton);
+
+    // Metronome Click Toggle Button
+    metronomeButton.setButtonText(juce::String::fromUTF8("🔔 Click"));
+    setMetronomeEnabled(true);
+    metronomeButton.onClick = [this]() {
+        metronomeActive = !metronomeActive;
+        setMetronomeEnabled(metronomeActive);
+        if (onMetronomeToggled) onMetronomeToggled(metronomeActive);
+    };
+    addAndMakeVisible(metronomeButton);
+
+    // Routine Mode Button
+    routineButton.setButtonText(juce::CharPointer_UTF8("\xe2\x8f\xb1\xef\xb8\x8f Routine (20m)"));
+    routineButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(16, 185, 129).withAlpha(0.35f));
+    routineButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(52, 211, 153));
+    routineButton.onClick = [this]() {
+        if (onRoutineClicked) onRoutineClicked();
+    };
+    addAndMakeVisible(routineButton);
 }
 
 void ScoreboardComponent::resized()
@@ -42,9 +102,59 @@ void ScoreboardComponent::resized()
     const int rightEdge = bounds.getRight() - 12;
     const int topEdge = bounds.getY() + 10;
 
-    selectMelodyButton.setBounds(rightEdge - 110, topEdge, 110, 28);
-    restartButton.setBounds(rightEdge - 205, topEdge, 88, 28);
-    modeSelector.setBounds(rightEdge - 345, topEdge, 132, 28);
+    selectMelodyButton.setBounds(rightEdge - 95, topEdge, 95, 28);
+    restartButton.setBounds(rightEdge - 175, topEdge, 75, 28);
+    metronomeButton.setBounds(rightEdge - 255, topEdge, 75, 28);
+    modeSelector.setBounds(rightEdge - 410, topEdge, 150, 28);
+    disrupterSelector.setBounds(rightEdge - 550, topEdge, 135, 28);
+    eyeCursorButton.setBounds(rightEdge - 660, topEdge, 105, 28);
+    routineButton.setBounds(rightEdge - 785, topEdge, 120, 28);
+}
+
+void ScoreboardComponent::setMetronomeEnabled(bool enabled)
+{
+    metronomeActive = enabled;
+    if (metronomeActive)
+    {
+        metronomeButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(16, 185, 129).withAlpha(0.35f));
+        metronomeButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(52, 211, 153));
+        metronomeButton.setButtonText(juce::String::fromUTF8("🔔 Click"));
+    }
+    else
+    {
+        metronomeButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(30, 41, 59));
+        metronomeButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(148, 163, 184));
+        metronomeButton.setButtonText(juce::String::fromUTF8("🔕 Click"));
+    }
+    repaint();
+}
+
+void ScoreboardComponent::setEyeCursorEnabled(bool enabled)
+{
+    eyeCursorActive = enabled;
+    if (eyeCursorActive)
+    {
+        eyeCursorButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(14, 165, 233).withAlpha(0.35f));
+        eyeCursorButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(56, 189, 248));
+    }
+    else
+    {
+        eyeCursorButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(30, 41, 59));
+        eyeCursorButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(148, 163, 184));
+    }
+    repaint();
+}
+
+void ScoreboardComponent::setDisrupterMode(VisualDisrupterMode mode)
+{
+    int id = 1;
+    switch (mode)
+    {
+        case VisualDisrupterMode::None: id = 1; break;
+        case VisualDisrupterMode::VanishingBar: id = 2; break;
+        case VisualDisrupterMode::AdvanceCurtain: id = 3; break;
+    }
+    disrupterSelector.setSelectedId(id, juce::dontSendNotification);
 }
 
 void ScoreboardComponent::updateState(const MelodyScorer& scorer, const DetectedChord& chord, double bpm, bool hostPlaying, const std::vector<int>& activeNotes, bool preferFlats, int reviewMistakeIndex)
@@ -99,6 +209,21 @@ void ScoreboardComponent::updateState(const MelodyScorer& scorer, const Detected
     const auto& scorecard = scorer.getScorecard();
     accuracyPercent = scorecard.pitchAccuracy;
     rhythmPercent = scorecard.rhythmAccuracy;
+    sightReadingScore = scorecard.sightReadingScore;
+    recoveries = scorecard.recoveries;
+    practiceMode = scorer.getPracticeMode();
+
+    int expectedId = 1;
+    switch (practiceMode)
+    {
+        case PracticeMode::Wait: expectedId = 1; break;
+        case PracticeMode::Tempo: expectedId = 2; break;
+        case PracticeMode::StrictTime: expectedId = 3; break;
+        case PracticeMode::FirstRead: expectedId = 4; break;
+    }
+    if (modeSelector.getSelectedId() != expectedId)
+        modeSelector.setSelectedId(expectedId, juce::dontSendNotification);
+
     currentStreak = scorer.getCurrentStreak();
     noteIndex = scorer.getCurrentNoteIndex();
     totalNotes = static_cast<int>(melody.notes.size());
@@ -301,9 +426,21 @@ void ScoreboardComponent::paint(juce::Graphics& g)
     const float pitchX = streakX + 82.0f;
     g.setColour(juce::Colour::fromRGB(148, 163, 184));
     g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
-    g.drawText("Pitch: " + juce::String(accuracyPercent) + "%", pitchX, y, 75.0f, 22.0f, juce::Justification::centredLeft);
-    const float rhythmX = pitchX + 78.0f;
-    g.drawText("Rhythm: " + juce::String(rhythmPercent) + "%", rhythmX, y, 85.0f, 22.0f, juce::Justification::centredLeft);
+    g.drawText("Pitch: " + juce::String(accuracyPercent) + "%", pitchX, y, 70.0f, 22.0f, juce::Justification::centredLeft);
+    const float rhythmX = pitchX + 72.0f;
+    g.drawText("Rhythm: " + juce::String(rhythmPercent) + "%", rhythmX, y, 78.0f, 22.0f, juce::Justification::centredLeft);
+
+    const float srX = rhythmX + 80.0f;
+    g.setColour(juce::Colour::fromRGB(56, 189, 248)); // Sky 400
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText("Sight-Read: " + juce::String(sightReadingScore) + "%", srX, y, 105.0f, 22.0f, juce::Justification::centredLeft);
+
+    if (recoveries > 0)
+    {
+        const float recX = srX + 108.0f;
+        g.setColour(juce::Colour::fromRGB(16, 185, 129));
+        g.drawText(juce::String::fromUTF8("\xE2\x9A\xA1 ") + juce::String(recoveries), recX, y, 45.0f, 22.0f, juce::Justification::centredLeft);
+    }
 
     // Detected Chord Display
     const float chordX = bounds.getRight() - 250.0f;

@@ -28,6 +28,7 @@ export class AudioEngine {
     this.isMuted = false;
     this.noiseBuffer = null;
     this.selectedDeviceId = 'default';
+    this.synthMuted = false;
 
     this.isInitialized = false;
   }
@@ -237,6 +238,10 @@ export class AudioEngine {
     this.setVolume(this.volume);
   }
 
+  setSynthMute(muted) {
+    this.synthMuted = !!muted;
+  }
+
   setPreset(name) {
     this.preset = name;
     if (name === 'none') {
@@ -336,6 +341,7 @@ export class AudioEngine {
    * Play Note On - Synchronous execution when AudioContext is running for zero microtask latency
    */
   noteOn(midi, velocity = 100) {
+    if (this.synthMuted) return;
     if (this.preset === 'none') return;
     if (!this.isInitialized || !this.ctx || this.ctx.state !== 'running') {
       this.init().then(() => {
