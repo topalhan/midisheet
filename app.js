@@ -1,3 +1,4 @@
+export const BUILD_ID = '20260915.1944';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -5,13 +6,13 @@
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=metronome_fix_v8';
+import { NotationRenderer } from './notation.js?v=20260915.1944';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=metronome_fix_v8';
+import { MelodyTrainer } from './trainer.js?v=20260915.1944';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=metronome_fix_v8';
+import { DailyRoutineController } from './routine.js?v=20260915.1944';
 
 class App {
   constructor() {
@@ -211,6 +212,10 @@ class App {
   }
 
   async init() {
+    // Display Build ID in Settings
+    const buildEl = document.getElementById('settings-build-id');
+    if (buildEl) buildEl.innerText = BUILD_ID;
+
     // 1. Initialize Notation Canvas
     this.notation = new NotationRenderer(this.canvas, {
       preferFlats: this.preferFlats,
