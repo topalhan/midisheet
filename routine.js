@@ -449,8 +449,14 @@ export class DailyRoutineController {
   }
 
   repeatCurrentSubPhase() {
-    this.subPhaseElapsedSeconds = 0;
-    this.loadSubPhase(this.currentSubPhaseIndex, true);
+    const phase = this.getCurrentPhase();
+    const timeRemaining = phase ? (phase.durationSeconds - this.subPhaseElapsedSeconds) : 0;
+    // If timer was expired or nearly exhausted, grant fresh time for extra round
+    if (timeRemaining <= 10) {
+      this.subPhaseElapsedSeconds = 0;
+    }
+    // Load subphase preserving existing round history
+    this.loadSubPhase(this.currentSubPhaseIndex, true, true);
     this.startOrResume();
   }
 
@@ -552,12 +558,14 @@ export class DailyRoutineController {
     }
   }
 
-  loadSubPhase(index, autoStartExercise = true) {
+  loadSubPhase(index, autoStartExercise = true, preserveRounds = false) {
     if (index < 0 || index >= this.subPhases.length) return;
     this.currentSubPhaseIndex = index;
-    this.subPhaseElapsedSeconds = 0;
-    this.subPhaseRounds = [];
-    this.currentRoundIndex = 1;
+    if (!preserveRounds) {
+      this.subPhaseElapsedSeconds = 0;
+      this.subPhaseRounds = [];
+      this.currentRoundIndex = 1;
+    }
     if (this.roundCountdownInterval) {
       clearInterval(this.roundCountdownInterval);
       this.roundCountdownInterval = null;
@@ -787,20 +795,7 @@ export class DailyRoutineController {
       this.routineStats.recoveryPoints += summary.recoveryPoints || 0;
     }
 
-    // If in Block 2 Rhythm Tap, loop the rhythm exercise if time remains
-    if (phase.type === 'rhythm_tap') {
-      if (this.isRunning && this.subPhaseElapsedSeconds < phase.durationSeconds - 5) {
-        setTimeout(() => {
-          if (this.isRunning && this.getCurrentPhase()?.type === 'rhythm_tap') {
-            this.trainer.restart();
-            this.trainer.startMetronome();
-          }
-        }, 1000);
-      } else {
-        this.pauseForSubPhaseTransition();
-      }
-      return;
-    }
+
 
     // If in Block 3 Take 1, store mistakes for targeted fix
     if (phase.type === 'take1') {
@@ -852,39 +847,14 @@ export class DailyRoutineController {
       };
       this.subPhaseRounds.push(roundSummary);
 
-      const timeRemaining = phase.durationSeconds - this.subPhaseElapsedSeconds;
-      if (this.isRunning && timeRemaining > 4) {
-        this.currentRoundIndex++;
-        let countdown = 3;
+      this.currentRoundIndex++;
 
-        if (this.onRoundComplete) {
-          this.onRoundComplete(roundSummary, this.subPhaseRounds, countdown);
-        }
-
-        if (this.roundCountdownInterval) {
-          clearInterval(this.roundCountdownInterval);
-        }
-
-        this.roundCountdownInterval = setInterval(() => {
-          countdown--;
-          if (this.onRoundTick) {
-            this.onRoundTick(roundSummary, countdown, Math.max(0, phase.durationSeconds - this.subPhaseElapsedSeconds));
-          }
-          if (countdown <= 0) {
-            clearInterval(this.roundCountdownInterval);
-            this.roundCountdownInterval = null;
-            if (this.isRunning && this.getCurrentPhase()?.id === phase.id) {
-              this.trainer.restart();
-              if (!phase.waitMode) {
-                this.trainer.startMetronome();
-              }
-            }
-          }
-        }, 1000);
-      } else {
-        // Sub-phase timer has expired or almost expired -> pause and show transition popup!
-        this.pauseForSubPhaseTransition();
+      if (this.onRoundComplete) {
+        this.onRoundComplete(roundSummary, this.subPhaseRounds, 0);
       }
+
+      // Always present the transition modal to offer [Continue to Next Exercise] or [Practice Again]!
+      this.pauseForSubPhaseTransition();
       return;
     }
   }
