@@ -543,45 +543,10 @@ export class MelodyTrainer {
    * Re-align metronome to user's first note strike in Wait mode
    */
   alignMetronomeTo(anchorTime) {
-    if (!this.metronomeEnabled || this.isTimeDrivenMode()) return;
-    this.stopMetronome();
-
-    const timeSig = this.currentMelody ? (this.currentMelody.timeSignature || [4, 4]) : [4, 4];
-    const beatsPerMeasure = timeSig[0] || 4;
-    const beatMs = (60 / this.bpm) * 1000;
-
-    // Note 0 was struck on Beat 0 (Measure 1 Beat 1); schedule next tick on Beat 2
-    this.currentBeatIndex = 1;
-    let nextTickTime = anchorTime + beatMs;
-
-    const tick = () => {
-      if (this.isFinished || this.mode !== 'wait' || !this.metronomeEnabled) {
-        this.stopMetronome();
-        return;
-      }
-
-      const now = performance.now();
-      this.lastBeatTime = now;
-
-      const beatInMeasure = (this.currentBeatIndex % beatsPerMeasure);
-      const isDownbeat = (beatInMeasure === 0);
-
-      if (this.onMetronomeTick && this.metronomeEnabled) {
-        this.onMetronomeTick(beatInMeasure, isDownbeat, {
-          isCountIn: false,
-          beat: beatInMeasure + 1,
-          total: beatsPerMeasure
-        });
-      }
-
-      this.currentBeatIndex++;
-      nextTickTime += beatMs;
-      const delay = Math.max(0, nextTickTime - performance.now());
-      this.metronomeTimer = setTimeout(tick, delay);
-    };
-
-    const initialDelay = Math.max(0, nextTickTime - performance.now());
-    this.metronomeTimer = setTimeout(tick, initialDelay);
+    // Preserves steady, continuous metronome pulse without cancelling scheduled clicks or stalling
+    if (this.metronomeEnabled && !this.metronomeTimer) {
+      this.startMetronome();
+    }
   }
 
   /**
@@ -686,9 +651,9 @@ export class MelodyTrainer {
       this.lastNoteTimestampMs = now;
       this.expectedCumulativeBeats = targetDuration;
 
-      // In Wait mode, re-align metronome to Note 0 downbeat if metronome is active
-      if (this.metronomeEnabled) {
-        this.alignMetronomeTo(now);
+      // In Wait mode: maintain uninterrupted, steady metronome pulse without stalling
+      if (this.metronomeEnabled && !this.metronomeTimer) {
+        this.startMetronome();
       }
 
       rating = 'perfect';

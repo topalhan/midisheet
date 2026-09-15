@@ -5,13 +5,13 @@
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=loop_scoring_v7';
+import { NotationRenderer } from './notation.js?v=metronome_fix_v8';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=loop_scoring_v7';
+import { MelodyTrainer } from './trainer.js?v=metronome_fix_v8';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=loop_scoring_v7';
+import { DailyRoutineController } from './routine.js?v=metronome_fix_v8';
 
 class App {
   constructor() {
