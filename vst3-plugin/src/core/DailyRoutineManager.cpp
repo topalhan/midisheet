@@ -265,8 +265,8 @@ void DailyRoutineManager::buildPlan()
     // Block 2
     subPhases.push_back({ "block2_rhythm", 2, "Block 2: Pre-Flight Analysis",
                           "Part 1: Rhythm Tap & Subdivision (Paul Harris)", 120.0, static_cast<double>(excerpt.bpm), "rhythm_tap",
-                          "Synth audio is MUTED. Metronome is clicking. Tap rhythm along (Spacebar) and vocalize subdivisions aloud.",
-                          false, false, false, true, true, 0.0, 0, excerpt });
+                          "Play rhythm on MIDI instrument tapping the same note (or Spacebar). Metronome is clicking. Focus on subdivisions.",
+                          true, false, false, false, true, 0.0, 0, excerpt });
 
     subPhases.push_back({ "block2_audit", 2, "Block 2: Pre-Flight Analysis",
                           "Part 2: Visual Interval Audit & Ghost-Fingering", 180.0, static_cast<double>(excerpt.bpm), "audit",
@@ -392,6 +392,16 @@ void DailyRoutineManager::loadSubPhase(int index)
 
     scorer.loadMelodyObject(phase.exercise);
     scorer.setBpm(phase.bpm);
+
+    if (phase.type == "rhythm_tap")
+    {
+        const int tapMidi = phase.exercise.notes.empty() ? 60 : phase.exercise.notes[0].midi;
+        scorer.setRhythmTapMode(true, tapMidi);
+    }
+    else
+    {
+        scorer.setRhythmTapMode(false, -1);
+    }
 
     if (phase.strictMode)
         scorer.setPracticeMode(PracticeMode::StrictTime);
@@ -611,7 +621,7 @@ void DailyRoutineManager::onMelodyCompleted(const PracticeScorecard& scorecard)
         completedFlashLines.insert(phase->flashLineIndex);
         skipSubPhase();
     }
-    else if (phase->type == "targeted_fix")
+    else if (phase->type == "rhythm_tap" || phase->type == "targeted_fix")
     {
         if (subPhaseElapsedSeconds < phase->durationSeconds - 5.0)
         {

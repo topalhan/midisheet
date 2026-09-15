@@ -5,13 +5,13 @@
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=clean_notes_2';
+import { NotationRenderer } from './notation.js?v=loop_scoring_v7';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=rhythm_fix_1';
+import { MelodyTrainer } from './trainer.js?v=loop_scoring_v7';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js';
+import { DailyRoutineController } from './routine.js?v=loop_scoring_v7';
 
 class App {
   constructor() {
@@ -157,6 +157,55 @@ class App {
     this.routineSummaryRecoveryPts = document.getElementById('routine-summary-recovery-pts');
     this.btnRoutineCompleteDone = document.getElementById('btn-routine-complete-done');
     this.routine = null;
+
+    // Exercise Guide Modal references
+    this.modalExerciseGuide = document.getElementById('modal-exercise-guide');
+    this.btnCloseGuideModal = document.getElementById('btn-close-guide-modal');
+    this.btnRoutineGuide = document.getElementById('btn-routine-guide');
+    this.btnPracticeGuide = document.getElementById('btn-practice-guide');
+    this.btnGuideStart = document.getElementById('btn-guide-start');
+    this.btnGuidePrev = document.getElementById('btn-guide-prev');
+    this.btnGuideNext = document.getElementById('btn-guide-next');
+    this.guideModalBadge = document.getElementById('guide-modal-badge');
+    this.guideModalMeta = document.getElementById('guide-modal-meta');
+    this.guideModalTitle = document.getElementById('guide-modal-title');
+    this.guideModalObjective = document.getElementById('guide-modal-objective');
+    this.guideModalNeuroscience = document.getElementById('guide-modal-neuroscience');
+    this.guideModalHowTo = document.getElementById('guide-modal-how-to');
+    this.guideModalPitfalls = document.getElementById('guide-modal-pitfalls');
+    this.guideModalProTip = document.getElementById('guide-modal-pro-tip');
+    this.currentGuideSubphaseIndex = 0;
+
+    // Routine Round Iteration feedback elements
+    this.routineRoundBanner = document.getElementById('routine-round-banner');
+    this.roundBannerStars = document.getElementById('round-banner-stars');
+    this.roundBannerTitle = document.getElementById('round-banner-title');
+    this.roundBannerTime = document.getElementById('round-banner-time');
+    this.roundBannerCountdown = document.getElementById('round-banner-countdown');
+    this.btnRoundAdvanceEarly = document.getElementById('btn-round-advance-early');
+    this.routineRoundHistory = document.getElementById('routine-round-history');
+
+    // Sub-Phase Transition Modal elements
+    this.modalPhaseComplete = document.getElementById('modal-phase-complete');
+    this.phaseCompleteBadge = document.getElementById('phase-complete-badge');
+    this.phaseCompleteTimeBadge = document.getElementById('phase-complete-time-badge');
+    this.phaseCompleteTitle = document.getElementById('phase-complete-title');
+    this.phaseCompleteSubtitle = document.getElementById('phase-complete-subtitle');
+    this.phaseCompleteAccuracy = document.getElementById('phase-complete-accuracy');
+    this.phaseCompleteStars = document.getElementById('phase-complete-stars');
+    this.phaseCompleteRounds = document.getElementById('phase-complete-rounds');
+    this.phaseCompleteNotes = document.getElementById('phase-complete-notes');
+    this.phaseCompleteMistakes = document.getElementById('phase-complete-mistakes');
+    this.phaseCompleteRoundsContainer = document.getElementById('phase-complete-rounds-container');
+    this.phaseCompleteRoundsCount = document.getElementById('phase-complete-rounds-count');
+    this.phaseCompleteRoundsList = document.getElementById('phase-complete-rounds-list');
+    this.phaseCompleteNextCard = document.getElementById('phase-complete-next-card');
+    this.phaseCompleteNextTitle = document.getElementById('phase-complete-next-title');
+    this.phaseCompleteNextMeta = document.getElementById('phase-complete-next-meta');
+    this.phaseCompleteNextDesc = document.getElementById('phase-complete-next-desc');
+    this.btnPhaseCompleteContinue = document.getElementById('btn-phase-complete-continue');
+    this.btnPhaseCompleteRepeat = document.getElementById('btn-phase-complete-repeat');
+    this.btnPhaseCompleteGuide = document.getElementById('btn-phase-complete-guide');
 
     this.init();
   }
@@ -441,6 +490,20 @@ class App {
       this.showTimingFeedback(timing);
     };
 
+    this.trainer.onRhythmTapFeedback = (timing) => {
+      if (this.routineTapFeedback) {
+        this.routineTapFeedback.innerText = timing.text || `${timing.rating.toUpperCase()} (${timing.offsetMs}ms)`;
+        this.routineTapFeedback.style.color = timing.rating === 'perfect' ? '#34d399' : (timing.rating === 'early' || timing.rating === 'late' ? '#fbbf24' : '#f87171');
+      }
+      if (this.routine) {
+        this.routine.routineStats.totalTaps++;
+        if (timing.rating === 'perfect' || timing.rating === 'early' || timing.rating === 'late') {
+          this.routine.routineStats.goodTaps++;
+          this.routine.routineStats.rhythmHits++;
+        }
+      }
+    };
+
     this.trainer.onMetronomeTick = (beatIndex, isDownbeat, countInState) => {
       // 1. Play Audio Metronome Click
       if (this.trainer.metronomeEnabled) {
@@ -602,7 +665,10 @@ class App {
       if (this.practicePlayedNote) {
         this.practicePlayedNote.innerText = playedInfo.fullName;
         const targetNote = this.trainer.getCurrentTargetNote();
-        if (targetNote && targetNote.midi === midi) {
+        const isMatch = this.trainer.rhythmTapMode
+          ? (midi === (this.trainer.expectedTapMidi || targetNote?.midi) || (targetNote && midi === targetNote.midi))
+          : (targetNote && targetNote.midi === midi);
+        if (isMatch) {
           this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-emerald-400';
         } else {
           this.practicePlayedNote.className = 'text-xl sm:text-2xl font-black text-rose-400';
@@ -673,7 +739,9 @@ class App {
           noteIndex: this.trainer.noteIndex,
           noteResults: this.trainer.noteResults,
           isFinished: this.trainer.isFinished,
-          mode: this.trainer.mode
+          mode: this.trainer.mode,
+          isCountingIn: this.trainer.isCountingIn,
+          isAnalyzing: this.trainer.isAnalyzing
         });
       }
       this.updateTargetKeyHint();
@@ -740,7 +808,11 @@ class App {
     }
 
     // Target note
-    if (state.targetNote) {
+    if (this.trainer.rhythmTapMode) {
+      const tapMidi = this.trainer.expectedTapMidi || state.targetNote?.midi || 60;
+      const tapInfo = MusicTheory.getNoteInfo(tapMidi, this.preferFlats);
+      this.practiceTargetNote.innerText = `Tap ${tapInfo.fullName}`;
+    } else if (state.targetNote) {
       const targetInfo = MusicTheory.getNoteInfo(state.targetNote.midi, this.preferFlats);
       this.practiceTargetNote.innerText = targetInfo.fullName;
     } else if (state.isFinished) {
@@ -852,14 +924,24 @@ class App {
 
   updateTargetKeyHint() {
     this.removeTargetKeyHint();
-    if (this.appMode !== 'practice') return;
+    if (this.appMode === 'practice' || this.appMode === 'routine') {
+      if (this.trainer.rhythmTapMode) {
+        const tapMidi = this.trainer.expectedTapMidi || this.trainer.getCurrentTargetNote()?.midi;
+        if (tapMidi) {
+          const keyEl = this.pianoContainer.querySelector(`[data-midi="${tapMidi}"]`);
+          if (keyEl) {
+            keyEl.classList.add('target-hint');
+          }
+        }
+      } else {
+        const targetNote = this.trainer.getCurrentTargetNote();
+        if (!targetNote) return;
 
-    const targetNote = this.trainer.getCurrentTargetNote();
-    if (!targetNote) return;
-
-    const keyEl = this.pianoContainer.querySelector(`[data-midi="${targetNote.midi}"]`);
-    if (keyEl) {
-      keyEl.classList.add('target-hint');
+        const keyEl = this.pianoContainer.querySelector(`[data-midi="${targetNote.midi}"]`);
+        if (keyEl) {
+          keyEl.classList.add('target-hint');
+        }
+      }
     }
   }
 
@@ -1713,13 +1795,31 @@ class App {
     this.routine.onPhaseChange = (phase, progress) => {
       // Update Phase Badge & Title
       if (this.routinePhaseBadge) {
-        this.routinePhaseBadge.innerText = `Block ${phase.blockIndex} • Part ${phase.title.includes('Part 2') ? '2' : '1'}`;
+        let partStr = 'Part 1';
+        if (phase.blockIndex === 1) {
+          partStr = phase.id.includes('thirds') ? 'Part 2' : 'Part 1';
+        } else if (phase.blockIndex === 2) {
+          partStr = phase.type === 'audit' ? 'Part 2' : 'Part 1';
+        } else if (phase.blockIndex === 3) {
+          partStr = phase.type === 'take1' ? 'Part 1 (Cold Take)' : (phase.type === 'targeted_fix' ? 'Part 2 (Loop Fix)' : 'Part 3 (Buffered)');
+        } else if (phase.blockIndex === 4) {
+          partStr = `Flash ${phase.lineIndex !== undefined ? (phase.lineIndex + 1) + '/3' : 'Reading'}`;
+        }
+        this.routinePhaseBadge.innerText = `Block ${phase.blockIndex} • ${partStr}`;
       }
       if (this.routinePhaseTitle) {
         this.routinePhaseTitle.innerText = phase.title;
       }
       if (this.routinePhaseInstructions) {
         this.routinePhaseInstructions.innerText = phase.methodology;
+      }
+
+      // Reset Per-Iteration Round Feedback and History on phase change
+      if (this.routineRoundBanner) {
+        this.routineRoundBanner.classList.add('hidden');
+      }
+      if (this.routineRoundHistory) {
+        this.routineRoundHistory.innerHTML = '';
       }
 
       // Update 4-Block Pills
@@ -1738,6 +1838,16 @@ class App {
       if (this.routineRhythmTapBox) {
         if (phase.type === 'rhythm_tap') {
           this.routineRhythmTapBox.classList.remove('hidden');
+          const tapMidi = (phase.exercise?.notes?.[0]?.midi) || 60;
+          const noteInfo = MusicTheory.getNoteInfo(tapMidi, this.preferFlats);
+          if (this.routineTapFeedback) {
+            this.routineTapFeedback.innerText = `Tap ${noteInfo.fullName} (or any key) on beat!`;
+            this.routineTapFeedback.style.color = '#38bdf8';
+          }
+          const tapLabel = document.getElementById('routine-tap-btn-label');
+          if (tapLabel) {
+            tapLabel.innerText = `Tap Rhythm (${noteInfo.fullName} / Space)`;
+          }
         } else {
           this.routineRhythmTapBox.classList.add('hidden');
         }
@@ -1763,7 +1873,11 @@ class App {
       const keySigSelect = document.getElementById('select-key-signature');
       if (keySigSelect && phase.exercise && phase.exercise.key) {
         keySigSelect.value = phase.exercise.key;
-        this.notation.setKeySignature(phase.exercise.key);
+        if (typeof this.notation.setKeySignature === 'function') {
+          this.notation.setKeySignature(phase.exercise.key);
+        } else {
+          this.notation.setOption('keySignature', phase.exercise.key);
+        }
       }
 
       // Update practice target hint
@@ -1794,6 +1908,62 @@ class App {
       }
     };
 
+    // Subphase Round Iteration Completion & Scoring Callbacks
+    this.routine.onRoundComplete = (roundSummary, allRounds, countdown) => {
+      // 1. Show Round Completion Banner
+      if (this.routineRoundBanner) {
+        this.routineRoundBanner.classList.remove('hidden');
+      }
+      if (this.roundBannerStars) {
+        this.roundBannerStars.innerText = '⭐'.repeat(roundSummary.stars);
+      }
+      if (this.roundBannerTitle) {
+        this.roundBannerTitle.innerText = `Round ${roundSummary.round}: ${roundSummary.accuracy}% Accuracy`;
+      }
+      if (this.roundBannerTime) {
+        this.roundBannerTime.innerText = `(${roundSummary.durationSeconds}s)`;
+      }
+      if (this.roundBannerCountdown) {
+        const mins = Math.floor(roundSummary.remainingSeconds / 60);
+        const secs = roundSummary.remainingSeconds % 60;
+        this.roundBannerCountdown.innerText = `Restarting Round ${roundSummary.round + 1} in ${countdown}s... (${mins}:${secs.toString().padStart(2, '0')} left)`;
+      }
+
+      // 2. Add round history pill badge
+      if (this.routineRoundHistory) {
+        const pill = document.createElement('div');
+        pill.className = 'px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1.5 shadow-sm';
+        pill.innerHTML = `
+          <span class="text-white font-mono">Round ${roundSummary.round}:</span>
+          <span class="font-extrabold text-emerald-300">${roundSummary.accuracy}%</span>
+          <span class="text-amber-400 text-[9px]">${'⭐'.repeat(roundSummary.stars)}</span>
+          <span class="text-slate-400 font-mono text-[9px]">(${roundSummary.durationSeconds}s)</span>
+        `;
+        this.routineRoundHistory.appendChild(pill);
+      }
+
+      // 3. Show celebration toast
+      this.showToast(`✨ Round ${roundSummary.round} Complete: ${roundSummary.accuracy}% Accuracy! (${roundSummary.durationSeconds}s)`, 'success');
+    };
+
+    this.routine.onRoundTick = (roundSummary, countdown, remainingSec) => {
+      if (countdown > 0) {
+        if (this.roundBannerCountdown) {
+          const mins = Math.floor(remainingSec / 60);
+          const secs = remainingSec % 60;
+          this.roundBannerCountdown.innerText = `Restarting Round ${roundSummary.round + 1} in ${countdown}s... (${mins}:${secs.toString().padStart(2, '0')} left)`;
+        }
+      } else {
+        if (this.routineRoundBanner) {
+          this.routineRoundBanner.classList.add('hidden');
+        }
+      }
+    };
+
+    this.routine.onSubPhaseTimeout = (stats, nextPhase, currentPhase) => {
+      this.openSubPhaseCompleteModal(stats, nextPhase, currentPhase);
+    };
+
     this.routine.onComplete = (summary) => {
       this.openRoutineCompleteModal(summary);
     };
@@ -1817,6 +1987,229 @@ class App {
       this.routineSummaryRecoveryPts.innerText = `+${summary.recoveryPoints}`;
     }
     this.modalRoutineComplete.classList.add('open');
+  }
+
+  /**
+   * Sub-Phase Complete Transition Modal Controller
+   */
+  openSubPhaseCompleteModal(stats, nextPhase, currentPhase) {
+    if (!this.modalPhaseComplete) return;
+
+    // Ensure any open guide modal is dismissed
+    this.closeExerciseGuide();
+
+    // 1. Header context
+    if (this.phaseCompleteBadge) {
+      const blockNum = stats.blockIndex || (currentPhase?.blockIndex || 1);
+      let partStr = '';
+      if (stats.phaseTitle?.includes('Part 1') || stats.phaseType === 'awkward' || stats.phaseType === 'take1') {
+        partStr = 'Part 1';
+      } else if (stats.phaseTitle?.includes('Part 2') || stats.phaseType === 'thirds' || stats.phaseType === 'targeted_fix') {
+        partStr = 'Part 2';
+      } else if (stats.phaseTitle?.includes('Part 3') || stats.phaseType === 'take2') {
+        partStr = 'Part 3';
+      } else if (stats.phaseType === 'flash') {
+        partStr = `Flash ${stats.phaseIndex !== undefined ? (stats.phaseIndex - 6) + '/3' : ''}`;
+      }
+      this.phaseCompleteBadge.innerText = partStr ? `Block ${blockNum} • ${partStr} Complete` : `Block ${blockNum} Complete`;
+    }
+    if (this.phaseCompleteTimeBadge) {
+      const m = Math.floor((stats.elapsedSeconds || 0) / 60);
+      const s = String((stats.elapsedSeconds || 0) % 60).padStart(2, '0');
+      this.phaseCompleteTimeBadge.innerText = `${m}:${s} Elapsed`;
+    }
+    if (this.phaseCompleteTitle) {
+      this.phaseCompleteTitle.innerText = stats.phaseTitle || currentPhase?.title || 'Exercise Complete';
+    }
+
+    // 2. Scorecard stats
+    if (this.phaseCompleteAccuracy) {
+      this.phaseCompleteAccuracy.innerText = `${stats.accuracy}%`;
+      this.phaseCompleteAccuracy.className = `text-3xl font-black font-mono ${stats.accuracy >= 90 ? 'text-emerald-400' : (stats.accuracy >= 75 ? 'text-amber-400' : 'text-rose-400')}`;
+    }
+    if (this.phaseCompleteStars) {
+      this.phaseCompleteStars.innerText = '⭐'.repeat(stats.stars || 1);
+    }
+    if (this.phaseCompleteRounds) {
+      const count = stats.roundsCount || (stats.rounds ? stats.rounds.length : 1);
+      this.phaseCompleteRounds.innerText = `${count} Loop${count === 1 ? '' : 's'}`;
+    }
+    if (this.phaseCompleteNotes) {
+      this.phaseCompleteNotes.innerText = `${stats.totalNotes || 0} Notes`;
+    }
+    if (this.phaseCompleteMistakes) {
+      if (stats.mistakes === 0) {
+        this.phaseCompleteMistakes.innerText = '0 Errors 🎯';
+        this.phaseCompleteMistakes.className = 'text-base font-bold text-emerald-300 font-mono mt-0.5';
+      } else {
+        this.phaseCompleteMistakes.innerText = `${stats.mistakes} Error${stats.mistakes === 1 ? '' : 's'}`;
+        this.phaseCompleteMistakes.className = 'text-base font-bold text-amber-300 font-mono mt-0.5';
+      }
+    }
+
+    // 3. Round Progression Pills
+    if (this.phaseCompleteRoundsList) {
+      this.phaseCompleteRoundsList.innerHTML = '';
+      const rounds = stats.rounds || [];
+      if (rounds.length > 0) {
+        if (this.phaseCompleteRoundsContainer) {
+          this.phaseCompleteRoundsContainer.classList.remove('hidden');
+        }
+        if (this.phaseCompleteRoundsCount) {
+          this.phaseCompleteRoundsCount.innerText = `${rounds.length} completed`;
+        }
+        rounds.forEach((r) => {
+          const pill = document.createElement('div');
+          pill.className = 'px-2 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1.5 shadow-sm';
+          pill.innerHTML = `
+            <span class="text-white font-mono">Round ${r.round}:</span>
+            <span class="font-extrabold ${r.accuracy >= 90 ? 'text-emerald-300' : 'text-amber-300'}">${r.accuracy}%</span>
+            <span class="text-amber-400 text-[9px]">${'⭐'.repeat(r.stars || 1)}</span>
+            <span class="text-slate-400 font-mono text-[9px]">(${r.durationSeconds}s)</span>
+          `;
+          this.phaseCompleteRoundsList.appendChild(pill);
+        });
+      } else {
+        if (this.phaseCompleteRoundsContainer) {
+          this.phaseCompleteRoundsContainer.classList.add('hidden');
+        }
+      }
+    }
+
+    // 4. Up Next Exercise Preview Card
+    if (nextPhase) {
+      if (this.phaseCompleteNextCard) this.phaseCompleteNextCard.classList.remove('hidden');
+      if (this.phaseCompleteNextTitle) {
+        this.phaseCompleteNextTitle.innerText = `Block ${nextPhase.blockIndex} • ${nextPhase.title}`;
+      }
+      if (this.phaseCompleteNextMeta) {
+        const keyName = nextPhase.exercise?.key || this.routine?.targetKey || 'C Major';
+        const mins = Math.round((nextPhase.durationSeconds || 120) / 60);
+        this.phaseCompleteNextMeta.innerText = `${keyName} • ${nextPhase.bpm || 60} BPM • ${mins} min`;
+      }
+      if (this.phaseCompleteNextDesc) {
+        this.phaseCompleteNextDesc.innerText = nextPhase.objective || nextPhase.methodology || 'Continue to the next sight-reading exercise.';
+      }
+      if (this.btnPhaseCompleteContinue) {
+        this.btnPhaseCompleteContinue.innerHTML = `
+          <span>Continue to Next Exercise</span>
+          <span class="text-base">⏭️</span>
+          <span class="text-[10px] font-normal px-1.5 py-0.5 rounded bg-black/20 text-slate-900 border border-black/10">Space ↵</span>
+        `;
+      }
+    } else {
+      // All blocks completed
+      if (this.phaseCompleteNextCard) this.phaseCompleteNextCard.classList.remove('hidden');
+      if (this.phaseCompleteNextTitle) {
+        this.phaseCompleteNextTitle.innerText = '🏆 Curriculum Complete!';
+      }
+      if (this.phaseCompleteNextMeta) {
+        this.phaseCompleteNextMeta.innerText = '20-Minute Master Routine Finished';
+      }
+      if (this.phaseCompleteNextDesc) {
+        this.phaseCompleteNextDesc.innerText = 'You have mastered all four blocks of daily deliberate sight-reading training.';
+      }
+      if (this.btnPhaseCompleteContinue) {
+        this.btnPhaseCompleteContinue.innerHTML = `
+          <span>View Full Routine Summary</span>
+          <span class="text-base">🏆</span>
+          <span class="text-[10px] font-normal px-1.5 py-0.5 rounded bg-black/20 text-slate-900 border border-black/10">Space ↵</span>
+        `;
+      }
+    }
+
+    // 5. Open modal
+    this.modalPhaseComplete.classList.add('open');
+  }
+
+  closeSubPhaseCompleteModal() {
+    this.modalPhaseComplete?.classList.remove('open');
+  }
+
+  /**
+   * Exercise & Melody Guide Modal Controller
+   */
+  openExerciseGuide(index = null) {
+    if (!this.modalExerciseGuide) return;
+    if (index !== null && index >= 0) {
+      this.currentGuideSubphaseIndex = index;
+    } else if (this.appMode === 'routine' && this.routine) {
+      this.currentGuideSubphaseIndex = this.routine.currentSubPhaseIndex || 0;
+    } else {
+      this.currentGuideSubphaseIndex = 0;
+    }
+    this.renderExerciseGuideContent(this.currentGuideSubphaseIndex);
+    this.modalExerciseGuide.classList.add('open');
+  }
+
+  closeExerciseGuide() {
+    this.modalExerciseGuide?.classList.remove('open');
+  }
+
+  renderExerciseGuideContent(index) {
+    const total = this.routine?.subPhases?.length || 10;
+    const safeIndex = Math.max(0, Math.min(total - 1, index));
+    this.currentGuideSubphaseIndex = safeIndex;
+
+    const phase = this.routine?.subPhases?.[safeIndex];
+    if (phase) {
+      if (this.guideModalBadge) {
+        this.guideModalBadge.innerText = `BLOCK ${phase.blockIndex} • ${phase.blockName ? phase.blockName.toUpperCase() : 'ROUTINE'}`;
+      }
+      if (this.guideModalMeta) {
+        const keyName = phase.exercise?.key || this.routine?.targetKey || 'C Major';
+        const mins = Math.round((phase.durationSeconds || 120) / 60);
+        this.guideModalMeta.innerText = `${keyName} • ${phase.bpm || 60} BPM • ${mins} min (${phase.type.toUpperCase()})`;
+      }
+      if (this.guideModalTitle) {
+        this.guideModalTitle.innerText = phase.title;
+      }
+      if (this.guideModalObjective) {
+        this.guideModalObjective.innerText = phase.objective || phase.methodology || 'Targeting sight-reading agility and accurate pitch matching.';
+      }
+      if (this.guideModalNeuroscience) {
+        this.guideModalNeuroscience.innerText = phase.neuroscience || 'Deliberate practice with immediate feedback trains neural pathways for fluent decoding.';
+      }
+      if (this.guideModalHowTo) {
+        if (Array.isArray(phase.howTo)) {
+          this.guideModalHowTo.innerHTML = phase.howTo.map((step, idx) => `
+            <div class="flex items-start gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-mono font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">${idx + 1}</span>
+              <span class="text-slate-200 text-xs sm:text-sm leading-relaxed">${step}</span>
+            </div>
+          `).join('');
+        } else {
+          this.guideModalHowTo.innerHTML = `<div class="text-slate-200 text-xs sm:text-sm leading-relaxed">${phase.methodology || ''}</div>`;
+        }
+      }
+      if (this.guideModalPitfalls) {
+        this.guideModalPitfalls.innerText = phase.pitfalls || 'Rushing ahead or playing with excess muscle tension.';
+      }
+      if (this.guideModalProTip) {
+        this.guideModalProTip.innerText = phase.proTip || 'Breathe calmly, keep eyes moving ahead of your hands.';
+      }
+    } else {
+      const melody = this.trainer?.currentMelody;
+      if (this.guideModalBadge) this.guideModalBadge.innerText = `PRACTICE • ${melody?.difficulty || 'GENERAL'}`;
+      if (this.guideModalMeta) this.guideModalMeta.innerText = `${melody?.key || 'C Major'} • ${this.trainer?.bpm || 96} BPM`;
+      if (this.guideModalTitle) this.guideModalTitle.innerText = melody?.title || 'Sight-Reading Exercise';
+      if (this.guideModalObjective) this.guideModalObjective.innerText = melody?.description || 'Read accurately in rhythm.';
+      if (this.guideModalNeuroscience) this.guideModalNeuroscience.innerText = 'Sight-reading fluency develops when rhythmic pulse takes precedence over stopping to fix mistakes.';
+      if (this.guideModalHowTo) {
+        this.guideModalHowTo.innerHTML = `
+          <div class="flex items-start gap-2.5">
+            <span class="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-mono font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">1</span>
+            <span class="text-slate-200 text-xs sm:text-sm leading-relaxed">Check the clef and key signature before playing note 1.</span>
+          </div>
+          <div class="flex items-start gap-2.5">
+            <span class="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-mono font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">2</span>
+            <span class="text-slate-200 text-xs sm:text-sm leading-relaxed">Keep moving forward with the metronome pulse—never restart!</span>
+          </div>
+        `;
+      }
+      if (this.guideModalPitfalls) this.guideModalPitfalls.innerText = 'Looking down at your fingers or pausing when a mistake occurs.';
+      if (this.guideModalProTip) this.guideModalProTip.innerText = 'Keep your eyes anchored 1 to 2 beats ahead of where your hands are playing.';
+    }
   }
 
   setupUIEventListeners() {
@@ -1852,7 +2245,14 @@ class App {
 
     // Routine Rhythm Tap Button
     this.btnRoutineTap?.addEventListener('click', () => {
-      this.routine?.registerRhythmTap();
+      const phase = this.routine?.getCurrentPhase();
+      if (phase && phase.type === 'rhythm_tap') {
+        const tapMidi = this.trainer?.expectedTapMidi || this.trainer?.getCurrentTargetNote()?.midi || 60;
+        this.handleNoteOn(tapMidi, 100);
+        setTimeout(() => this.handleNoteOff(tapMidi), 60);
+      } else {
+        this.routine?.registerRhythmTap();
+      }
     });
 
     // Completion modal Done button
@@ -1863,20 +2263,131 @@ class App {
       if (e.target === this.modalRoutineComplete) this.modalRoutineComplete.classList.remove('open');
     });
 
+    // Sub-Phase Transition Modal Listeners
+    this.btnPhaseCompleteContinue?.addEventListener('click', () => {
+      this.closeSubPhaseCompleteModal();
+      this.routine?.continueToNextSubPhase();
+    });
+
+    this.btnPhaseCompleteRepeat?.addEventListener('click', () => {
+      this.closeSubPhaseCompleteModal();
+      this.routine?.repeatCurrentSubPhase();
+    });
+
+    this.btnPhaseCompleteGuide?.addEventListener('click', () => {
+      this.closeSubPhaseCompleteModal();
+      this.openExerciseGuide(this.routine?.currentSubPhaseIndex || 0);
+    });
+
+    this.modalPhaseComplete?.addEventListener('click', (e) => {
+      if (e.target === this.modalPhaseComplete) {
+        this.closeSubPhaseCompleteModal();
+      }
+    });
+
     // Spacebar listener for Rhythm Tap / Pause in Routine Mode
     window.addEventListener('keydown', (e) => {
+      const tag = e.target.tagName;
+      const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+
+      // Sub-Phase Complete Modal Shortcut: Space / Enter advances to next exercise
+      if (this.modalPhaseComplete?.classList.contains('open')) {
+        if (e.code === 'Space' || e.key === 'Enter') {
+          e.preventDefault();
+          this.btnPhaseCompleteContinue?.click();
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeSubPhaseCompleteModal();
+          return;
+        }
+      }
+
+      // Guide Modal Shortcut: ? or H toggles the Exercise Guide
+      if (!isInput && (e.key === '?' || e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        if (this.modalExerciseGuide?.classList.contains('open')) {
+          this.closeExerciseGuide();
+        } else {
+          this.openExerciseGuide();
+        }
+        return;
+      }
+
+      // Escape key closes Guide Modal
+      if (e.key === 'Escape') {
+        if (this.modalExerciseGuide?.classList.contains('open')) {
+          this.closeExerciseGuide();
+          return;
+        }
+      }
+
       if (this.appMode === 'routine' && e.code === 'Space') {
-        const tag = e.target.tagName;
-        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+        if (!isInput) {
           e.preventDefault();
           const phase = this.routine?.getCurrentPhase();
           if (phase && phase.type === 'rhythm_tap') {
-            this.routine.registerRhythmTap();
+            const tapMidi = this.trainer?.expectedTapMidi || this.trainer?.getCurrentTargetNote()?.midi || 60;
+            this.handleNoteOn(tapMidi, 100);
+            setTimeout(() => this.handleNoteOff(tapMidi), 60);
           } else {
             this.routine.togglePlay();
           }
         }
       }
+    });
+
+    // Exercise Guide Modal Triggers
+    this.btnRoutineGuide?.addEventListener('click', () => this.openExerciseGuide());
+    this.btnPracticeGuide?.addEventListener('click', () => this.openExerciseGuide());
+    this.routinePhaseTitle?.addEventListener('click', () => this.openExerciseGuide());
+    this.routinePhaseInstructions?.addEventListener('click', () => this.openExerciseGuide());
+    this.btnCloseGuideModal?.addEventListener('click', () => this.closeExerciseGuide());
+    this.btnGuideStart?.addEventListener('click', () => {
+      this.closeExerciseGuide();
+      if (this.appMode === 'routine' && !this.routine?.isRunning) {
+        this.routine?.startOrResume();
+      }
+    });
+    this.btnGuidePrev?.addEventListener('click', () => {
+      const total = this.routine?.subPhases?.length || 10;
+      this.currentGuideSubphaseIndex = (this.currentGuideSubphaseIndex - 1 + total) % total;
+      this.renderExerciseGuideContent(this.currentGuideSubphaseIndex);
+    });
+    this.btnGuideNext?.addEventListener('click', () => {
+      const total = this.routine?.subPhases?.length || 10;
+      this.currentGuideSubphaseIndex = (this.currentGuideSubphaseIndex + 1) % total;
+      this.renderExerciseGuideContent(this.currentGuideSubphaseIndex);
+    });
+    this.modalExerciseGuide?.addEventListener('click', (e) => {
+      if (e.target === this.modalExerciseGuide) this.closeExerciseGuide();
+    });
+
+    // Early advance button on round completion banner -> opens transition popup modal
+    this.btnRoundAdvanceEarly?.addEventListener('click', () => {
+      if (this.routineRoundBanner) {
+        this.routineRoundBanner.classList.add('hidden');
+      }
+      this.routine?.pauseForSubPhaseTransition();
+    });
+
+    // 4-Block Curriculum Progress Tabs Direct Navigation
+    document.getElementById('block-tab-1')?.addEventListener('click', () => {
+      if (this.appMode !== 'routine') this.setAppMode('routine');
+      this.routine?.loadSubPhase(0);
+    });
+    document.getElementById('block-tab-2')?.addEventListener('click', () => {
+      if (this.appMode !== 'routine') this.setAppMode('routine');
+      this.routine?.loadSubPhase(2);
+    });
+    document.getElementById('block-tab-3')?.addEventListener('click', () => {
+      if (this.appMode !== 'routine') this.setAppMode('routine');
+      this.routine?.loadSubPhase(4);
+    });
+    document.getElementById('block-tab-4')?.addEventListener('click', () => {
+      if (this.appMode !== 'routine') this.setAppMode('routine');
+      this.routine?.loadSubPhase(7);
     });
 
     // Melody Trainer controls
@@ -2275,5 +2786,5 @@ class App {
 
 // Instantiate on DOM load
 window.addEventListener('DOMContentLoaded', () => {
-  new App();
+  window.app = new App();
 });

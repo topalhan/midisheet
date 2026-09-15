@@ -119,6 +119,15 @@ public:
      */
     bool evaluateNote(int midiNote, int velocity, double noteTimestampSec = 0.0, double hostPpq = -1.0);
 
+    // Rhythm Tap & Subdivision Mode
+    void setRhythmTapMode(bool enabled, int tapMidi = -1) noexcept
+    {
+        rhythmTapMode = enabled;
+        expectedTapMidi = tapMidi;
+    }
+    bool isRhythmTapMode() const noexcept { return rhythmTapMode; }
+    int getExpectedTapMidi() const noexcept { return expectedTapMidi; }
+
     // Silent Analysis phase (First-Read mode)
     void startSilentAnalysis(double durationSeconds = 30.0);
     void updateSilentAnalysis(double elapsedSeconds);
@@ -212,6 +221,10 @@ private:
     double countInElapsedBeats = 0.0;
     double lastProcessTimeSec = -1.0;
     std::map<juce::String, FirstReadRecord> firstReadRecords;
+
+    // Rhythm Tap state
+    bool rhythmTapMode = false;
+    int expectedTapMidi = -1;
 
     int currentStreak = 0;
     int maxStreak = 0;

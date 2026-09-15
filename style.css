@@ -296,6 +296,10 @@ body {
   pointer-events: auto;
 }
 
+#modal-phase-complete {
+  z-index: 60;
+}
+
 .modal-card {
   background-color: #0f172a;
   border: 1px solid rgba(255, 255, 255, 0.15);

@@ -7,12 +7,12 @@
  * - Block 4: Volume Flash Reading (3 min: 3 Lines with 10s Flash Scan + Strict Single-Play Lockout)
  */
 
-import { 
-  getAwkwardPairs, 
-  generateBrokenThirds, 
-  getSightReadingExcerpt, 
-  getFlashReadingLines, 
-  KEY_DEFINITIONS 
+import {
+  getAwkwardPairs,
+  generateBrokenThirds,
+  getSightReadingExcerpt,
+  getFlashReadingLines,
+  KEY_DEFINITIONS
 } from './routine_exercises.js';
 import { MusicTheory } from './chords.js';
 
@@ -59,12 +59,19 @@ export class DailyRoutineController {
       goodTaps: 0
     };
 
+    // Iteration & Round tracking for looping exercises
+    this.subPhaseRounds = [];
+    this.currentRoundIndex = 1;
+    this.roundCountdownInterval = null;
+
     // UI callbacks
     this.onTick = options.onTick || null;
     this.onPhaseChange = options.onPhaseChange || null;
     this.onComplete = options.onComplete || null;
     this.onTapFeedback = options.onTapFeedback || null;
     this.onFlashCountdown = options.onFlashCountdown || null;
+    this.onRoundComplete = options.onRoundComplete || null;
+    this.onRoundTick = options.onRoundTick || null;
 
     // Build plan for initial key
     this.buildPlan();
@@ -98,12 +105,19 @@ export class DailyRoutineController {
         durationSeconds: 120, // 2 minutes
         bpm: 60,
         type: 'awkward',
-        exercise: getAwkwardPairs(key),
-        methodology: 'Muscle memory & awkward intervals. Slur slowly at 60 BPM. Ensure fingers snap down/lift as unified blocks with zero hand tension. Tactile execution without reading pressure.',
-        strictMode: false,
         waitMode: true,
-        lookahead: false,
-        audioMuted: false
+        strictMode: false,
+        exercise: getAwkwardPairs(key),
+        methodology: 'Slur slowly at 60 BPM. Ensure fingers snap down and lift as unified blocks with zero hand tension. Tactile execution without reading pressure.',
+        objective: 'Eliminate physical hesitation and finger stumbling on the most treacherous micro-intervals and register breaks in this key before any reading pressure is introduced.',
+        neuroscience: 'Pre-conditions the motor cortex and establishes tactile spatial familiarity. When the physical mechanism is effortless, the brain frees up 80% more cognitive bandwidth for reading notation.',
+        howTo: [
+          'Play in Wait Mode at a relaxed 60 BPM—there is zero time rush.',
+          'Slur each awkward interval smoothly; snap fingers down and release as unified blocks.',
+          'Maintain an arched hand dome with soft wrists; never collapse knuckles.'
+        ],
+        pitfalls: 'Rushing the tempo, playing with stiff fingers, or punching notes. Strive for butter-smooth legato.',
+        proTip: 'Focus your attention entirely on the physical tactile sensations in your fingertips rather than reading.'
       },
       {
         id: 'block1_thirds',
@@ -114,12 +128,19 @@ export class DailyRoutineController {
         durationSeconds: 180, // 3 minutes
         bpm: 76,
         type: 'thirds',
+        waitMode: true,
+        strictMode: false,
         exercise: generateBrokenThirds(key, 76),
         methodology: `Klosé diatonic broken thirds in ${key}. Focus on continuous, unbroken sound and smooth physical transitions across finger registers.`,
-        strictMode: false,
-        waitMode: true,
-        lookahead: false,
-        audioMuted: false
+        objective: 'Establish unbroken diatonic muscle memory across 2 full octaves and build finger agility across skip intervals (1-3, 2-4, 3-5).',
+        neuroscience: 'Sight-reading literature is dominated by diatonic thirds. Automating third-interval finger shapes prevents micro-hesitations when reading melodies with skips.',
+        howTo: [
+          'Play in Wait Mode at 76 BPM with continuous, singing tone.',
+          'Feel the physical skip distance between alternate fingers across octave boundaries.',
+          'Breathe steadily (wind instruments) and keep an unbroken stream of sound.'
+        ],
+        pitfalls: 'Disconnecting notes with choppy staccato or tensing up on octave crossing notes.',
+        proTip: 'Hear the next third in your mind half a beat before your fingers strike.'
       },
 
       // -------------------------------------------------------------
@@ -134,13 +155,19 @@ export class DailyRoutineController {
         durationSeconds: 120, // 2 minutes
         bpm: excerpt.bpm || 96,
         type: 'rhythm_tap',
-        exercise: excerpt,
-        methodology: 'Instrument audio is MUTED. Metronome is clicking. Tap the rhythm along (tap button or Spacebar) and vocalize subdivisions aloud ("1-e-&-a 2-e-&-a").',
-        strictMode: false,
         waitMode: false,
-        interactiveTap: true,
-        lookahead: false,
-        audioMuted: true
+        strictMode: false,
+        exercise: excerpt,
+        methodology: 'Play the rhythm on your MIDI instrument tapping the same note (or use Spacebar). Metronome is clicking. Focus entirely on rhythmic precision and vocalize subdivisions aloud ("1-e-&-a 2-e-&-a").',
+        objective: 'Decouple rhythm processing from pitch decoding. 80% of sight-reading failure is caused by rhythmic panic; mastering the pulse in isolation cures it.',
+        neuroscience: 'Simultaneous Learning Principle (Paul Harris): The human brain cannot easily decipher novel pitch contours and complex meter subdivisions at the same time. Isolating rhythm locks in the pulse before pitches are introduced.',
+        howTo: [
+          'Tap the same note repeatedly on your instrument (or press Spacebar) in strict metronome time.',
+          'Vocalize the subdivisions aloud ("1-e-&-a 2-e-&-a" or "Ta-ka-di-mi").',
+          'Lock your downbeats directly to the metronome click with zero hesitation.'
+        ],
+        pitfalls: 'Trying to play different melody pitches. Ignore the pitches—only the rhythm counts!',
+        proTip: 'Lean into the beat. Tapping with confident, crisp releases dramatically boosts rhythmic accuracy.'
       },
       {
         id: 'block2_audit',
@@ -151,12 +178,20 @@ export class DailyRoutineController {
         durationSeconds: 180, // 3 minutes
         bpm: excerpt.bpm || 96,
         type: 'audit',
+        waitMode: true,
+        strictMode: false,
+        audioMuted: true,
         exercise: excerpt,
         methodology: 'Trace the melodic contour across the staff (steps vs leaps) with interval ribbons. Do NOT name note letters. Silently pre-finger keys on your instrument without blowing/striking.',
-        strictMode: false,
-        waitMode: true,
-        lookahead: false,
-        audioMuted: true
+        objective: 'Train your brain to recognize spatial intervals and melodic contours instantly, and physically pre-map key movements without audio distraction.',
+        neuroscience: 'Naming note letters (C-D-E) in your head adds a 200ms processing bottleneck. Sight-reading masters translate visual contour (steps vs leaps) directly to finger distance.',
+        howTo: [
+          'Synth audio is muted. Silently trace the colored interval ribbons (Green=Step, Orange=Third, Purple=Leap).',
+          'Ghost-finger: Silently pre-touch the keys on your instrument without striking or blowing.',
+          'Identify the highest note, lowest note, and cadence points before moving on.'
+        ],
+        pitfalls: 'Saying note letter names in your head or stopping to think about note spelling.',
+        proTip: 'Trust your visual spatial awareness: step = neighbor key, skip = skip one key, leap = jump.'
       },
 
       // -------------------------------------------------------------
@@ -171,12 +206,19 @@ export class DailyRoutineController {
         durationSeconds: 150, // 2.5 minutes
         bpm: excerpt.bpm || 96,
         type: 'take1',
+        waitMode: false,
+        strictMode: true,
         exercise: excerpt,
         methodology: 'Strict execution with metronome: Never stop, restart, or hesitate! Keep steady time. Jump back in immediately on downbeats to earn Downbeat Recovery bonuses.',
-        strictMode: true,
-        waitMode: false,
-        lookahead: false,
-        audioMuted: false
+        objective: 'Simulate true audition conditions. Eradicate the catastrophic "restart reflex" and build unstoppable forward momentum.',
+        neuroscience: 'In ensembles, gigs, and exams, stopping after a mistake ruins the entire performance. Professional musicians keep the pulse moving and re-enter on the next measure.',
+        howTo: [
+          'Play in Strict In-Tempo Mode with active metronome clicks.',
+          'If you hit a wrong note: NEVER STOP! Never try to correct it! Keep moving with the metronome.',
+          'Re-enter cleanly on the next downbeat to score a +35 Downbeat Recovery Bonus!'
+        ],
+        pitfalls: 'Stopping, stuttering, playing a note twice, or letting eyes look back at a mistake.',
+        proTip: 'Your eyes belong where the music is going, not where your fingers currently are.'
       },
       {
         id: 'block3_fix',
@@ -187,12 +229,19 @@ export class DailyRoutineController {
         durationSeconds: 120, // 2 minutes
         bpm: Math.max(60, (excerpt.bpm || 96) - 16),
         type: 'targeted_fix',
+        waitMode: false,
+        strictMode: false,
         exercise: null, // Generated dynamically after Take 1
         methodology: 'Isolating the stumbling measure from Take 1. Loop repeatedly at a steady, controlled tempo until finger hesitation vanishes.',
-        strictMode: false,
-        waitMode: false,
-        lookahead: false,
-        audioMuted: false
+        objective: 'Rewire muscle memory with laser focus on the exact stumbling measure from Take 1 instead of wasting time re-playing parts you already know.',
+        neuroscience: 'Myelination occurs through high-density repetition of difficult transitions at a controlled, error-free tempo. Slow looping cures the exact neurological glitch.',
+        howTo: [
+          'The system isolates the exact measure where you stumbled in Take 1 at a relaxed tempo (-16 BPM).',
+          'Loop the phrase repeatedly with deep relaxation and precise finger placement.',
+          'Continue looping until the phrase feels 100% natural, fluid, and effortless.'
+        ],
+        pitfalls: 'Rushing or tensing up. The tempo is intentionally relaxed so your brain can rewrite the movement.',
+        proTip: 'Pay special attention to the transition note entering and leaving the loop.'
       },
       {
         id: 'block3_take2',
@@ -203,12 +252,20 @@ export class DailyRoutineController {
         durationSeconds: 150, // 2.5 minutes
         bpm: excerpt.bpm || 96,
         type: 'take2',
+        waitMode: false,
+        strictMode: true,
+        lookahead: true,
         exercise: excerpt,
         methodology: 'Lookahead buffer active: The eye cursor leads 1 full measure ahead of the playhead. Push your visual attention ahead while fingers execute from buffer memory.',
-        strictMode: true,
-        waitMode: false,
-        lookahead: true,
-        audioMuted: false
+        objective: 'Master the "Eye-Hand Span": train your eyes to read 1 full measure ahead of where your fingers are physically playing.',
+        neuroscience: 'The hallmark of master sight-readers is visual buffer ingestion. Their eyes ingest measure 3 into short-term visual memory while their hands execute measure 2.',
+        howTo: [
+          'Watch the Decoupled Eye Pacer cursor leading 1 bar ahead of the playhead.',
+          'Let your eyes absorb upcoming shapes while your fingers play the note from short-term memory.',
+          'Maintain steady forward momentum; trust your visual buffer!'
+        ],
+        pitfalls: 'Letting your eyes snap backward to check what your hands just played. Keep eyes anchored ahead!',
+        proTip: 'Read ahead in chunks: look for the barline and notice the first note of the upcoming measure.'
       },
 
       // -------------------------------------------------------------
@@ -227,10 +284,15 @@ export class DailyRoutineController {
         flashPreview: 10,
         exercise: flashLines[0],
         methodology: 'Scan the 4-bar line for 10 seconds without playing. Then play straight through ONCE at tempo. Single-play lockout rule enforced!',
-        strictMode: true,
-        waitMode: false,
-        lookahead: false,
-        audioMuted: false
+        objective: 'Build high-speed visual chunking under intense time pressure with a strict single-play lockout rule.',
+        neuroscience: 'Flash exposure forces the visual cortex to group musical motifs, scale runs, and cadences into single cognitive chunks rather than reading note-by-note.',
+        howTo: [
+          '10-Second Scan Countdown: Study clef, key center, highest/lowest notes, and rhythm groupings without playing.',
+          'When countdown hits zero, play straight through ONCE at tempo without stopping.',
+          'Single-play lockout: You only get ONE shot per flash line!'
+        ],
+        pitfalls: 'Trying to read note-by-note during the scan. Absorb the entire 4-bar phrase as a visual silhouette.',
+        proTip: 'Look at the last bar first during the 10s scan so you know how the phrase resolves.'
       },
       {
         id: 'block4_flash2',
@@ -245,10 +307,14 @@ export class DailyRoutineController {
         flashPreview: 10,
         exercise: flashLines[1],
         methodology: 'Second flash line! 10s scan preview -> One brisk playthrough. Absorb shapes and cadence patterns at a glance.',
-        strictMode: true,
-        waitMode: false,
-        lookahead: false,
-        audioMuted: false
+        objective: 'High-volume rapid pattern processing. Reinforce first-read reflexes with a fresh musical contour.',
+        neuroscience: 'Volume reading builds perceptual fluency through exposure to diverse musical shapes under time constraints.',
+        howTo: [
+          'Scan for 10 seconds: look for rhythmic patterns and interval leaps.',
+          'Play once cleanly at tempo with confidence.'
+        ],
+        pitfalls: 'Freezing if you hit a bad note. Keep the pulse going until the final double barline.',
+        proTip: 'Notice the meter: tap your foot silently to internalize the pulse before the countdown ends.'
       },
       {
         id: 'block4_flash3',
@@ -263,10 +329,14 @@ export class DailyRoutineController {
         flashPreview: 10,
         exercise: flashLines[2],
         methodology: 'Final flash line! Lock in automatic sight-reading reflexes. Scan for 10s, then play through cleanly once.',
-        strictMode: true,
-        waitMode: false,
-        lookahead: false,
-        audioMuted: false
+        objective: 'Final curriculum challenge: brisk tempo, maximum focus, and flawless single-play execution to seal today\'s streak.',
+        neuroscience: 'Ending the 20-minute masterclass with a high-tempo successful read consolidates motor learning during sleep.',
+        howTo: [
+          '10-second scan: identify the tonic cadence and finger shifts.',
+          'Execute with brisk, joyful precision straight through to the finish!'
+        ],
+        pitfalls: 'Hesitating at the final cadence. Finish strong!',
+        proTip: 'Celebrate your completion! You have trained every key dimension of sight-reading mastery today.'
       }
     ];
   }
@@ -277,13 +347,29 @@ export class DailyRoutineController {
 
   startOrResume() {
     if (this.isRunning) return;
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
     this.isRunning = true;
-
-    // Load current phase if not loaded
-    this.loadSubPhase(this.currentSubPhaseIndex, false);
-
-    if (this.timerInterval) clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => this.tick(), 1000);
+
+    const phase = this.getCurrentPhase();
+    const isCurrentMelodyLoaded = this.trainer?.currentMelody && phase && this.trainer.currentMelody.id === phase.exercise?.id;
+
+    if (!phase || !isCurrentMelodyLoaded) {
+      try {
+        this.loadSubPhase(this.currentSubPhaseIndex, true);
+      } catch (err) {
+        console.error('Error in loadSubPhase during startOrResume:', err);
+      }
+    } else {
+      // Resuming existing phase without resetting elapsed time
+      if (!this.flashPreviewActive && !phase.waitMode && this.trainer) {
+        this.trainer.startMetronome();
+      }
+    }
+
     this.notifyTick();
   }
 
@@ -334,6 +420,10 @@ export class DailyRoutineController {
       totalTaps: 0,
       goodTaps: 0
     };
+    if (this.trainer) {
+      this.trainer.rhythmTapMode = false;
+      this.trainer.expectedTapMidi = null;
+    }
     this.buildPlan();
     this.loadSubPhase(0);
   }
@@ -345,6 +435,112 @@ export class DailyRoutineController {
       this.loadSubPhase(this.currentSubPhaseIndex);
     } else {
       this.finishRoutine();
+    }
+  }
+
+  continueToNextSubPhase() {
+    if (this.currentSubPhaseIndex < this.subPhases.length - 1) {
+      const nextIndex = this.currentSubPhaseIndex + 1;
+      this.loadSubPhase(nextIndex, true);
+      this.startOrResume();
+    } else {
+      this.finishRoutine();
+    }
+  }
+
+  repeatCurrentSubPhase() {
+    this.subPhaseElapsedSeconds = 0;
+    this.loadSubPhase(this.currentSubPhaseIndex, true);
+    this.startOrResume();
+  }
+
+  getCurrentSubPhaseStats() {
+    const phase = this.getCurrentPhase();
+    if (!phase) return null;
+
+    let accuracy = 100;
+    let stars = 3;
+    let mistakes = 0;
+    let totalNotes = 0;
+    let roundsCount = this.subPhaseRounds ? this.subPhaseRounds.length : 0;
+
+    if (this.subPhaseRounds && this.subPhaseRounds.length > 0) {
+      // Completed at least one round in this subphase
+      const sumAcc = this.subPhaseRounds.reduce((acc, r) => acc + (r.accuracy || 0), 0);
+      accuracy = Math.round(sumAcc / this.subPhaseRounds.length);
+      mistakes = this.subPhaseRounds.reduce((acc, r) => acc + (r.mistakes || 0), 0);
+      totalNotes = this.subPhaseRounds.reduce((acc, r) => acc + (r.totalNotes || (phase.exercise?.notes?.length || 0)), 0);
+      stars = accuracy >= 95 ? 3 : (accuracy >= 80 ? 2 : 1);
+    } else if (phase.type === 'rhythm_tap') {
+      const good = this.routineStats?.goodTaps || 0;
+      const total = this.routineStats?.totalTaps || 0;
+      accuracy = total > 0 ? Math.round((good / total) * 100) : 100;
+      mistakes = total - good;
+      totalNotes = total;
+      stars = accuracy >= 95 ? 3 : (accuracy >= 80 ? 2 : 1);
+      roundsCount = total > 0 ? 1 : 0;
+    } else {
+      // User was mid-exercise during round 1
+      const trainerStats = this.trainer?.stats;
+      if (trainerStats) {
+        accuracy = (trainerStats.accuracy !== undefined) ? trainerStats.accuracy : 100;
+        mistakes = (trainerStats.mistakeCount || 0) + (trainerStats.missedNotes || 0);
+        totalNotes = (trainerStats.correctNotes || 0) + mistakes;
+        stars = accuracy >= 95 ? 3 : (accuracy >= 80 ? 2 : 1);
+        roundsCount = (trainerStats.correctNotes > 0 || mistakes > 0) ? 1 : 0;
+      }
+    }
+
+    return {
+      phaseIndex: this.currentSubPhaseIndex,
+      phaseTitle: phase.title,
+      phaseType: phase.type,
+      blockIndex: phase.blockIndex,
+      blockName: phase.blockName,
+      accuracy: Math.max(0, Math.min(100, accuracy)),
+      stars,
+      mistakes,
+      totalNotes,
+      roundsCount,
+      rounds: this.subPhaseRounds ? [...this.subPhaseRounds] : [],
+      elapsedSeconds: this.subPhaseElapsedSeconds,
+      durationSeconds: phase.durationSeconds
+    };
+  }
+
+  pauseForSubPhaseTransition() {
+    const phase = this.getCurrentPhase();
+    if (!phase) {
+      this.finishRoutine();
+      return;
+    }
+
+    // 1. Pause the routine clock & timer so no time is lost while reviewing
+    this.pause();
+
+    // 2. Clear any pending round countdowns
+    if (this.roundCountdownInterval) {
+      clearInterval(this.roundCountdownInterval);
+      this.roundCountdownInterval = null;
+    }
+
+    // 3. Stop trainer metronome
+    if (this.trainer) {
+      this.trainer.stopMetronome();
+    }
+
+    // 4. Compute performance stats for the subphase that just completed
+    const stats = this.getCurrentSubPhaseStats();
+
+    // 5. Look up next phase in sequence
+    const nextIndex = this.currentSubPhaseIndex + 1;
+    const nextPhase = (nextIndex < this.subPhases.length) ? this.subPhases[nextIndex] : null;
+
+    // 6. Notify listener to display transition popup
+    if (this.onSubPhaseTimeout) {
+      this.onSubPhaseTimeout(stats, nextPhase, phase);
+    } else {
+      this.skipSubPhase();
     }
   }
 
@@ -360,6 +556,12 @@ export class DailyRoutineController {
     if (index < 0 || index >= this.subPhases.length) return;
     this.currentSubPhaseIndex = index;
     this.subPhaseElapsedSeconds = 0;
+    this.subPhaseRounds = [];
+    this.currentRoundIndex = 1;
+    if (this.roundCountdownInterval) {
+      clearInterval(this.roundCountdownInterval);
+      this.roundCountdownInterval = null;
+    }
     const phase = this.subPhases[index];
 
     // Determine exercise
@@ -390,6 +592,13 @@ export class DailyRoutineController {
 
     // Configure Trainer
     if (this.trainer && exercise) {
+      this.trainer.rhythmTapMode = (phase.type === 'rhythm_tap');
+      if (phase.type === 'rhythm_tap') {
+        this.trainer.expectedTapMidi = (exercise.notes && exercise.notes.length > 0) ? exercise.notes[0].midi : 60;
+      } else {
+        this.trainer.expectedTapMidi = null;
+      }
+
       this.trainer.loadMelodyObject(exercise);
       this.trainer.bpm = phase.bpm || exercise.bpm || 96;
 
@@ -432,43 +641,46 @@ export class DailyRoutineController {
 
   tick() {
     if (!this.isRunning) return;
+    try {
+      this.totalElapsedSeconds++;
+      this.subPhaseElapsedSeconds++;
 
-    this.totalElapsedSeconds++;
-    this.subPhaseElapsedSeconds++;
-
-    const phase = this.getCurrentPhase();
-    if (!phase) {
-      this.finishRoutine();
-      return;
-    }
-
-    // Handle Flash preview countdown in Block 4
-    if (this.flashPreviewActive) {
-      this.flashCountdownSeconds--;
-      if (this.onFlashCountdown) {
-        this.onFlashCountdown(this.flashCountdownSeconds, phase);
+      const phase = this.getCurrentPhase();
+      if (!phase) {
+        this.finishRoutine();
+        return;
       }
-      if (this.flashCountdownSeconds <= 0) {
-        this.flashPreviewActive = false;
-        if (this.trainer) {
-          this.trainer.startMetronome();
+
+      // Handle Flash preview countdown in Block 4
+      if (this.flashPreviewActive) {
+        this.flashCountdownSeconds--;
+        if (this.onFlashCountdown) {
+          this.onFlashCountdown(this.flashCountdownSeconds, phase);
+        }
+        if (this.flashCountdownSeconds <= 0) {
+          this.flashPreviewActive = false;
+          if (this.trainer) {
+            this.trainer.startMetronome();
+          }
         }
       }
-    }
 
-    // Check if sub-phase duration elapsed
-    if (this.subPhaseElapsedSeconds >= phase.durationSeconds) {
-      this.skipSubPhase();
-      return;
-    }
+      // Check if sub-phase duration elapsed
+      if (this.subPhaseElapsedSeconds >= phase.durationSeconds) {
+        this.pauseForSubPhaseTransition();
+        return;
+      }
 
-    // Check if master 20 minutes finished
-    if (this.totalElapsedSeconds >= this.totalDurationSeconds) {
-      this.finishRoutine();
-      return;
-    }
+      // Check if master 20 minutes finished
+      if (this.totalElapsedSeconds >= this.totalDurationSeconds) {
+        this.finishRoutine();
+        return;
+      }
 
-    this.notifyTick();
+      this.notifyTick();
+    } catch (err) {
+      console.error('Error in routine tick:', err);
+    }
   }
 
   notifyTick() {
@@ -575,6 +787,21 @@ export class DailyRoutineController {
       this.routineStats.recoveryPoints += summary.recoveryPoints || 0;
     }
 
+    // If in Block 2 Rhythm Tap, loop the rhythm exercise if time remains
+    if (phase.type === 'rhythm_tap') {
+      if (this.isRunning && this.subPhaseElapsedSeconds < phase.durationSeconds - 5) {
+        setTimeout(() => {
+          if (this.isRunning && this.getCurrentPhase()?.type === 'rhythm_tap') {
+            this.trainer.restart();
+            this.trainer.startMetronome();
+          }
+        }, 1000);
+      } else {
+        this.pauseForSubPhaseTransition();
+      }
+      return;
+    }
+
     // If in Block 3 Take 1, store mistakes for targeted fix
     if (phase.type === 'take1') {
       this.take1Mistakes = this.trainer.getMistakeIndices();
@@ -599,16 +826,66 @@ export class DailyRoutineController {
       return;
     }
 
-    // In Targeted Fix loop, loop the exercise again if time remains
-    if (phase.type === 'targeted_fix') {
-      if (this.isRunning && this.subPhaseElapsedSeconds < phase.durationSeconds - 5) {
-        setTimeout(() => {
-          if (this.isRunning && this.getCurrentPhase()?.type === 'targeted_fix') {
-            this.trainer.restart();
-            this.trainer.startMetronome();
+    // For all looping warm-up and practice phases:
+    // Block 1 (awkward pairs, thirds), Block 2 (rhythm tap, interval audit), Block 3 (targeted fix loop, take 2 lookahead)
+    const isLoopingPhase = (
+      phase.type === 'awkward' ||
+      phase.type === 'thirds' ||
+      phase.type === 'rhythm_tap' ||
+      phase.type === 'audit' ||
+      phase.type === 'targeted_fix' ||
+      phase.type === 'take2'
+    );
+
+    if (isLoopingPhase) {
+      const roundSummary = {
+        round: this.currentRoundIndex,
+        accuracy: (summary && summary.accuracy !== undefined) ? summary.accuracy : 100,
+        rhythmAccuracy: (summary && summary.rhythmAccuracy !== undefined) ? summary.rhythmAccuracy : 0,
+        mistakes: (summary && summary.mistakeCount !== undefined) ? summary.mistakeCount : 0,
+        stars: (summary && summary.stars !== undefined) ? summary.stars : 3,
+        durationSeconds: (summary && summary.durationSeconds) ? summary.durationSeconds : Math.max(1, Math.round(this.subPhaseElapsedSeconds)),
+        remainingSeconds: Math.max(0, phase.durationSeconds - this.subPhaseElapsedSeconds),
+        phaseTitle: phase.title,
+        phaseType: phase.type,
+        totalNotes: (summary && ((summary.correctNotes || 0) + (summary.mistakeCount || 0) + (summary.missedNotes || 0))) || (phase.exercise?.notes?.length || 0)
+      };
+      this.subPhaseRounds.push(roundSummary);
+
+      const timeRemaining = phase.durationSeconds - this.subPhaseElapsedSeconds;
+      if (this.isRunning && timeRemaining > 4) {
+        this.currentRoundIndex++;
+        let countdown = 3;
+
+        if (this.onRoundComplete) {
+          this.onRoundComplete(roundSummary, this.subPhaseRounds, countdown);
+        }
+
+        if (this.roundCountdownInterval) {
+          clearInterval(this.roundCountdownInterval);
+        }
+
+        this.roundCountdownInterval = setInterval(() => {
+          countdown--;
+          if (this.onRoundTick) {
+            this.onRoundTick(roundSummary, countdown, Math.max(0, phase.durationSeconds - this.subPhaseElapsedSeconds));
           }
-        }, 800);
+          if (countdown <= 0) {
+            clearInterval(this.roundCountdownInterval);
+            this.roundCountdownInterval = null;
+            if (this.isRunning && this.getCurrentPhase()?.id === phase.id) {
+              this.trainer.restart();
+              if (!phase.waitMode) {
+                this.trainer.startMetronome();
+              }
+            }
+          }
+        }, 1000);
+      } else {
+        // Sub-phase timer has expired or almost expired -> pause and show transition popup!
+        this.pauseForSubPhaseTransition();
       }
+      return;
     }
   }
 
@@ -689,8 +966,8 @@ export class DailyRoutineController {
       totalDurationMinutes: Math.round(this.totalElapsedSeconds / 60),
       notesPlayed: this.routineStats.notesPlayed,
       correctNotes: this.routineStats.correctNotes,
-      accuracy: this.routineStats.notesPlayed > 0 
-        ? Math.round((this.routineStats.correctNotes / this.routineStats.notesPlayed) * 100) 
+      accuracy: this.routineStats.notesPlayed > 0
+        ? Math.round((this.routineStats.correctNotes / this.routineStats.notesPlayed) * 100)
         : 100,
       recoveries: this.routineStats.recoveries,
       recoveryPoints: this.routineStats.recoveryPoints,

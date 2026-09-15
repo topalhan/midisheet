@@ -92,6 +92,11 @@ export class MelodyTrainer {
     this.onPlayheadMove = null;
     this.onFirstReadLocked = null;
     this.onComplete = null;
+    this.onRhythmTapFeedback = null;
+
+    // Rhythm Tap & Subdivision Mode (Paul Harris Method: tap single pitch or written pitch in tempo)
+    this.rhythmTapMode = false;
+    this.expectedTapMidi = null;
 
     // Load default melody
     this.loadMelody(this.melodies[0].id);
@@ -331,6 +336,14 @@ export class MelodyTrainer {
     this.playheadBeats = 0;
     this.previousNoteMissedOrMistake = false;
 
+    if (this.rhythmTapMode) {
+      this.expectedTapMidi = (this.currentMelody && this.currentMelody.notes && this.currentMelody.notes.length > 0)
+        ? this.currentMelody.notes[0].midi
+        : 60;
+    } else {
+      this.expectedTapMidi = null;
+    }
+
     this.noteResults = this.currentMelody.notes.map(() => ({
       status: 'pending',
       mistakes: 0,
@@ -444,6 +457,7 @@ export class MelodyTrainer {
       this.isCountingIn = true;
       this.countInBeat = 1;
       this.songStartTime = null;
+      this.notifyState();
     } else {
       this.isCountingIn = false;
       this.countInBeat = 0;
@@ -481,6 +495,7 @@ export class MelodyTrainer {
           this.songStartTime = now;
           this.currentBeatIndex = 0;
           this.playheadBeats = 0;
+          this.notifyState();
           if (this.onCountIn) {
             this.onCountIn(0, this.countInTotal); // Dismiss count-in banner cleanly at downbeat
           }
@@ -774,12 +789,17 @@ export class MelodyTrainer {
     const now = performance.now();
 
     // 1. Post-completion lockout (protects against breath release vibration)
-    if (now - this.lastCompletedTime < 140) {
+    const minCompletionGap = this.rhythmTapMode ? 50 : 140;
+    if (now - this.lastCompletedTime < minCompletionGap) {
       return;
     }
 
-    // 2. Same-note re-articulation protection for wind controllers
-    if (midi === this.lastPlayedMidi) {
+    // 2. Same-note re-articulation protection
+    if (this.rhythmTapMode) {
+      // In rhythm tap mode, user intentionally taps the same note repeatedly
+      this.heldNotes.delete(midi);
+      if (now - this.lastPlayedTime < 50) return;
+    } else if (midi === this.lastPlayedMidi) {
       if (this.heldNotes.has(midi)) return;
       if (now - this.lastPlayedTime < 180) return;
       const lastRel = this.lastReleaseTime.get(midi) || 0;
@@ -796,13 +816,38 @@ export class MelodyTrainer {
     const expectedMidi = targetNote.midi;
     const isTimeDriven = this.isTimeDrivenMode();
 
-    if (midi === expectedMidi) {
-      // Correct pitch struck!
+    let isMatch = false;
+    if (this.rhythmTapMode) {
+      if (this.expectedTapMidi === null || this.noteIndex === 0) {
+        this.expectedTapMidi = midi;
+      }
+      isMatch = (midi === this.expectedTapMidi || midi === expectedMidi);
+    } else {
+      isMatch = (midi === expectedMidi);
+    }
+
+    if (isMatch) {
+      // Correct pitch / rhythm tap struck!
       const currentSlot = this.noteResults[this.noteIndex];
       const isFirstTry = currentSlot.mistakes === 0;
 
       // Evaluate beat timing
       const timing = this.evaluateTiming(now);
+
+      if (this.rhythmTapMode) {
+        if (timing.rating === 'perfect') {
+          timing.text = `🎯 Perfect Beat! (${timing.offsetMs >= 0 ? '+' : ''}${timing.offsetMs}ms)`;
+        } else if (timing.rating === 'early') {
+          timing.text = `🟡 Early Beat (${timing.offsetMs}ms)`;
+        } else if (timing.rating === 'late') {
+          timing.text = `🟡 Late Beat (+${timing.offsetMs}ms)`;
+        } else {
+          timing.text = `🔴 Off-beat (${timing.offsetMs >= 0 ? '+' : ''}${timing.offsetMs}ms)`;
+        }
+        if (this.onRhythmTapFeedback) {
+          this.onRhythmTapFeedback(timing);
+        }
+      }
 
       // Downbeat Recovery Bonus Check
       const timeSig = this.currentMelody.timeSignature || [4, 4];
@@ -872,7 +917,9 @@ export class MelodyTrainer {
       this.stats.streak = 0;
       this.previousNoteMissedOrMistake = true;
 
-      const expectedInfo = MusicTheory.getNoteInfo(expectedMidi);
+      const expectedInfo = this.rhythmTapMode && this.expectedTapMidi !== null
+        ? MusicTheory.getNoteInfo(this.expectedTapMidi)
+        : MusicTheory.getNoteInfo(expectedMidi);
       const playedInfo = MusicTheory.getNoteInfo(midi);
 
       if (isTimeDriven) {
@@ -888,7 +935,17 @@ export class MelodyTrainer {
           this.onTimingFeedback({
             rating: timing.rating,
             offsetMs: timing.offsetMs,
-            text: `❌ ${playedInfo.fullName} • ${rhythmText}`
+            text: this.rhythmTapMode
+              ? `❌ Tap ${expectedInfo.fullName} • ${rhythmText}`
+              : `❌ ${playedInfo.fullName} • ${rhythmText}`
+          });
+        }
+
+        if (this.rhythmTapMode && this.onRhythmTapFeedback) {
+          this.onRhythmTapFeedback({
+            rating: 'mistake',
+            offsetMs: timing.offsetMs,
+            text: `❌ Tap ${expectedInfo.fullName}`
           });
         }
 

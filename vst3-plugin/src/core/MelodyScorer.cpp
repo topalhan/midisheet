@@ -468,7 +468,19 @@ bool MelodyScorer::evaluateNote(int midiNote, int velocity, double noteTimestamp
         }
     }
 
-    if (midiNote == target->midi)
+    bool isMatch = false;
+    if (rhythmTapMode)
+    {
+        if (expectedTapMidi < 0 || currentNoteIndex == 0)
+            expectedTapMidi = midiNote;
+        isMatch = (midiNote == expectedTapMidi || midiNote == target->midi);
+    }
+    else
+    {
+        isMatch = (midiNote == target->midi);
+    }
+
+    if (isMatch)
     {
         // Correct pitch struck!
         correctCount++;
@@ -523,6 +535,16 @@ bool MelodyScorer::evaluateNote(int midiNote, int velocity, double noteTimestamp
         mistakeCount++;
         currentStreak = 0;
         hadRecentMissOrMistake = true;
+
+        if (rhythmTapMode)
+        {
+            const auto expectedInfo = MusicTheory::getNoteInfo(expectedTapMidi >= 0 ? expectedTapMidi : target->midi);
+            lastFeedback.text = "Tap " + expectedInfo.fullName + "!";
+        }
+        else
+        {
+            lastFeedback.text = "Wrong Note (" + playedInfo.fullName + ")";
+        }
 
         if (isTimeDrivenMode())
         {

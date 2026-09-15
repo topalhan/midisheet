@@ -153,6 +153,9 @@
               <button id="btn-open-melody-modal" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 transition-colors flex items-center gap-1">
                 <span>📚 Choose Melody</span>
               </button>
+              <button id="btn-practice-guide" title="Melody Guide & Sight-Reading Objectives (Press ? or Click)" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition-colors flex items-center gap-1">
+                <span>💡 Guide</span>
+              </button>
               <button id="btn-load-midi" title="Load external .MID file to practice and score" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1">
                 <span>📁 Load .MID</span>
               </button>
@@ -319,16 +322,16 @@
       <!-- 4-Block Segmented Curriculum Progress Bar -->
       <div class="w-full flex flex-col gap-1 pt-1">
         <div class="grid grid-cols-4 gap-1.5 text-[10px] font-bold text-center">
-          <div id="block-tab-1" class="routine-block-pill active rounded-md py-1 bg-slate-800/90 text-emerald-400 border border-emerald-500/30">
+          <div id="block-tab-1" class="routine-block-pill active rounded-md py-1 bg-slate-800/90 text-emerald-400 border border-emerald-500/30 cursor-pointer hover:bg-slate-800 transition-colors" title="Jump to Block 1: Mechanical Calibration">
             1. Mechanical (5m)
           </div>
-          <div id="block-tab-2" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+          <div id="block-tab-2" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors" title="Jump to Block 2: Pre-Flight Analysis">
             2. Analysis (5m)
           </div>
-          <div id="block-tab-3" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+          <div id="block-tab-3" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors" title="Jump to Block 3: The Cold Sight-Read">
             3. Cold Read (7m)
           </div>
-          <div id="block-tab-4" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800">
+          <div id="block-tab-4" class="routine-block-pill rounded-md py-1 bg-slate-800/50 text-slate-400 border border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors" title="Jump to Block 4: Volume Flash Reading">
             4. Flash (3m)
           </div>
         </div>
@@ -341,28 +344,51 @@
       <!-- Exercise Guidance & Interactive Action Panel -->
       <div class="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="flex-1">
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span id="routine-phase-badge" class="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black uppercase tracking-wider">
               Block 1 • Part 1
             </span>
-            <h3 id="routine-phase-title" class="text-sm font-bold text-white">
-              Isolated Awkward Pairs (60 BPM)
+            <h3 id="routine-phase-title" class="text-sm font-bold text-white cursor-pointer hover:text-sky-300 transition-colors flex items-center gap-1.5 group" title="Click to view Exercise Guide & Objectives (or press ?)">
+              <span>Isolated Awkward Pairs (60 BPM)</span>
+              <span class="text-xs text-sky-400 opacity-60 group-hover:opacity-100 transition-opacity">ℹ️</span>
             </h3>
+            <button id="btn-routine-guide" title="Exercise Objectives & Methodology (Press ? or Click)" class="px-2 py-0.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center gap-1 transition-all shadow-sm">
+              <span>💡 Exercise Guide</span>
+            </button>
           </div>
-          <p id="routine-phase-instructions" class="text-xs text-slate-300 leading-relaxed">
+          <p id="routine-phase-instructions" class="text-xs text-slate-300 leading-relaxed cursor-pointer hover:text-slate-100" title="Click to open full Exercise Guide">
             Slur slowly at 60 BPM. Ensure fingers snap down and lift as unified blocks with zero hand tension. Tactile execution without reading pressure.
           </p>
+          <!-- Per-Iteration Round History Badges -->
+          <div id="routine-round-history" class="flex items-center gap-1.5 mt-2 flex-wrap empty:hidden"></div>
         </div>
 
         <!-- Dynamic Context Panels -->
-        <div id="routine-action-container" class="flex items-center gap-2">
+        <div id="routine-action-container" class="flex items-center gap-2 flex-wrap">
+          <!-- Round Completion & Iteration Feedback Banner -->
+          <div id="routine-round-banner" class="hidden flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/50 shadow-md shadow-emerald-950/40 text-xs">
+            <span id="round-banner-stars" class="text-amber-400 text-sm">⭐⭐⭐</span>
+            <div>
+              <div class="font-black text-white flex items-center gap-1.5">
+                <span id="round-banner-title">Round 1: 100%</span>
+                <span id="round-banner-time" class="text-[10px] text-slate-400 font-mono">(32s)</span>
+              </div>
+              <div id="round-banner-countdown" class="text-[10px] text-emerald-400 font-medium">
+                Next round in 3s...
+              </div>
+            </div>
+            <button id="btn-round-advance-early" class="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition-all ml-1 whitespace-nowrap" title="Advance to next part immediately">
+              <span>Next</span> <span>⏭️</span>
+            </button>
+          </div>
+
           <!-- Block 2A Interactive Rhythm Tap Button & Feedback -->
           <div id="routine-rhythm-tap-box" class="hidden flex items-center gap-2">
-            <button id="btn-routine-tap" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-sky-500/30 active:scale-95 transition-all flex items-center gap-1.5 animate-pulse">
-              <span>👆</span> Tap Rhythm (Space)
+            <button id="btn-routine-tap" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-sky-500/30 active:scale-95 transition-all flex items-center gap-1.5">
+              <span>🎹</span> <span id="routine-tap-btn-label">Tap Rhythm (MIDI Key / Space)</span>
             </button>
             <div id="routine-tap-feedback" class="text-xs font-bold text-sky-300 font-mono px-2 py-1 bg-sky-950/60 border border-sky-800/60 rounded-lg">
-              Tap with Click!
+              Play Same Note on Beat
             </div>
           </div>
 
@@ -792,6 +818,108 @@
     </div>
   </div>
 
+  <!-- Sub-Phase Exercise Complete Modal (Transition Between Curriculum Blocks) -->
+  <div id="modal-phase-complete" class="modal-backdrop">
+    <div class="modal-card max-w-lg text-center p-6 flex flex-col items-center gap-4 bg-slate-900/95 border border-slate-700/80 shadow-2xl rounded-2xl">
+      <!-- Icon Header -->
+      <div class="flex items-center justify-center">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-sky-500 to-emerald-400 flex items-center justify-center text-3xl shadow-xl shadow-emerald-500/20 text-white animate-pulse">
+          🎯
+        </div>
+      </div>
+
+      <!-- Title & Context -->
+      <div class="w-full">
+        <div class="flex items-center justify-center gap-2 mb-1">
+          <span id="phase-complete-badge" class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-[10px] uppercase font-extrabold tracking-wider text-emerald-300">
+            Block 1 • Part 1 Complete
+          </span>
+          <span id="phase-complete-time-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">
+            2:00 Elapsed
+          </span>
+        </div>
+        <h2 id="phase-complete-title" class="text-xl font-black text-white">Awkward Pairs Tactile Warm-Up</h2>
+        <p id="phase-complete-subtitle" class="text-xs text-slate-400 mt-0.5">Time cap reached! Here is your performance breakdown for this exercise.</p>
+      </div>
+
+      <!-- Scorecard & Metrics -->
+      <div class="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+        <!-- Hero Accuracy -->
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div class="text-left">
+            <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Success Rate</div>
+            <div class="flex items-baseline gap-2">
+              <span id="phase-complete-accuracy" class="text-3xl font-black text-emerald-400 font-mono">100%</span>
+              <span id="phase-complete-stars" class="text-amber-400 text-base">⭐⭐⭐</span>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Rounds</div>
+            <div id="phase-complete-rounds" class="text-2xl font-black text-sky-400 font-mono">3 Loops</div>
+          </div>
+        </div>
+
+        <!-- Secondary stats: Notes, Mistakes / Precision -->
+        <div class="grid grid-cols-2 gap-2 text-center text-xs">
+          <div class="bg-slate-900/60 rounded-lg p-2 border border-slate-800/60">
+            <div class="text-[10px] uppercase font-semibold text-slate-400">Notes Struck</div>
+            <div id="phase-complete-notes" class="text-base font-bold text-white font-mono mt-0.5">48 Notes</div>
+          </div>
+          <div class="bg-slate-900/60 rounded-lg p-2 border border-slate-800/60">
+            <div class="text-[10px] uppercase font-semibold text-slate-400">Pitch Precision</div>
+            <div id="phase-complete-mistakes" class="text-base font-bold text-emerald-300 font-mono mt-0.5">0 Errors</div>
+          </div>
+        </div>
+
+        <!-- Round History Pills (if multiple rounds looped) -->
+        <div id="phase-complete-rounds-container" class="w-full text-left pt-1">
+          <div class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 flex items-center justify-between">
+            <span>Round-by-Round Progression</span>
+            <span id="phase-complete-rounds-count" class="text-slate-400 font-mono text-[9px]">3 completed</span>
+          </div>
+          <div id="phase-complete-rounds-list" class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+            <!-- Dynamic pills inserted here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Up Next Card -->
+      <div id="phase-complete-next-card" class="w-full bg-gradient-to-r from-sky-950/40 via-slate-900 to-indigo-950/40 border border-sky-500/30 rounded-xl p-3.5 text-left flex flex-col gap-1.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] uppercase font-black tracking-wider text-sky-400 flex items-center gap-1">
+            <span>⏭️</span> Up Next in Curriculum
+          </span>
+          <span id="phase-complete-next-meta" class="text-[11px] font-mono text-slate-300">
+            C Major • 60 BPM • 3 min
+          </span>
+        </div>
+        <div id="phase-complete-next-title" class="text-sm font-bold text-white">
+          Block 1 • Part 2: Thirds & Fourths Spatial Warm-Up
+        </div>
+        <div id="phase-complete-next-desc" class="text-[11px] text-slate-400 leading-relaxed">
+          Expand tactile interval awareness across wider leaps without looking at your hands.
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex flex-col gap-2 w-full mt-1">
+        <button id="btn-phase-complete-continue" class="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2">
+          <span>Continue to Next Exercise</span>
+          <span class="text-base">⏭️</span>
+          <span class="text-[10px] font-normal px-1.5 py-0.5 rounded bg-black/20 text-slate-900 border border-black/10">Space ↵</span>
+        </button>
+        <div class="flex items-center gap-2 w-full">
+          <button id="btn-phase-complete-repeat" class="flex-1 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition-colors flex items-center justify-center gap-1">
+            <span>🔄</span> Practice Again
+          </button>
+          <button id="btn-phase-complete-guide" class="flex-1 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-sky-300 font-semibold text-xs border border-slate-700 transition-colors flex items-center justify-center gap-1">
+            <span>💡</span> Exercise Guide
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Daily Routine Completion Modal -->
   <div id="modal-routine-complete" class="modal-backdrop">
     <div class="modal-card max-w-md text-center p-6 flex flex-col items-center gap-4">
@@ -831,6 +959,96 @@
       <button id="btn-routine-complete-done" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-emerald-500/20">
         Awesome, Finish Today's Session!
       </button>
+    </div>
+  </div>
+
+  <!-- Exercise & Practice Guide Modal (On-Demand Pedagogical Deep Dive) -->
+  <div id="modal-exercise-guide" class="modal-backdrop">
+    <div class="modal-card max-w-2xl max-h-[90vh] flex flex-col">
+      <!-- Modal Header -->
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 sticky top-0 z-10">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-xl shadow-inner text-sky-300">
+            💡
+          </div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span id="guide-modal-badge" class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BLOCK 1 • MECHANICAL</span>
+              <span id="guide-modal-meta" class="text-xs font-mono text-slate-400 font-semibold">C Major • 60 BPM</span>
+            </div>
+            <h3 id="guide-modal-title" class="font-extrabold text-white text-base sm:text-lg mt-0.5">Isolated Awkward Pairs (60 BPM)</h3>
+          </div>
+        </div>
+        <button id="btn-close-guide-modal" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-sm transition-colors" title="Close (Esc)">✕</button>
+      </div>
+
+      <!-- Modal Body (Scrollable) -->
+      <div class="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs sm:text-sm text-slate-300 leading-relaxed">
+        <!-- Core Objective Card -->
+        <div class="bg-gradient-to-br from-sky-950/40 to-slate-900/80 border border-sky-500/30 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center gap-2 text-sky-400 font-bold text-xs uppercase tracking-wider mb-1.5">
+            <span>🎯</span> What This Exercise Is For
+          </div>
+          <p id="guide-modal-objective" class="text-slate-100 leading-relaxed font-medium text-sm">
+            Targeting mechanical calibration and finger dexterity...
+          </p>
+        </div>
+
+        <!-- Methodology & Neuroscience -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <div class="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-wider mb-1.5">
+            <span>🧠</span> The Science & Pedagogy
+          </div>
+          <p id="guide-modal-neuroscience" class="text-slate-300 leading-relaxed">
+            Understanding the cognitive process behind this training...
+          </p>
+        </div>
+
+        <!-- Step-by-Step Practice Guide -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <div class="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider mb-2">
+            <span>🎹</span> How to Practice & Execute
+          </div>
+          <div id="guide-modal-how-to" class="space-y-1.5 text-slate-200">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Pitfalls & Pro Tips Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="bg-rose-950/20 border border-rose-500/30 rounded-xl p-3.5">
+            <div class="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase tracking-wider mb-1.5">
+              <span>⚠️</span> Common Pitfalls to Avoid
+            </div>
+            <p id="guide-modal-pitfalls" class="text-slate-300 text-xs leading-relaxed">
+              Don't rush or look down at hands.
+            </p>
+          </div>
+          <div class="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3.5">
+            <div class="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider mb-1.5">
+              <span>⚡</span> Pro Tip
+            </div>
+            <p id="guide-modal-pro-tip" class="text-slate-300 text-xs leading-relaxed">
+              Keep hands soft and relax between strokes.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 sm:p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/90 flex-wrap gap-2">
+        <div class="flex items-center gap-1.5">
+          <button id="btn-guide-prev" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors">
+            <span>⏮️</span> Prev
+          </button>
+          <button id="btn-guide-next" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors">
+            Next <span>⏭️</span>
+          </button>
+        </div>
+        <button id="btn-guide-start" class="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-md shadow-emerald-500/30 transition-all flex items-center gap-1.5">
+          <span>🚀</span> <span>Got It, Let's Play!</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -995,6 +1213,6 @@
     MidiSheet • Real-time Web MIDI Music Notation, Trainer & Synthesizer
   </footer>
 
-  <script type="module" src="./app.js?v=rhythm_fix_1"></script>
+  <script type="module" src="./app.js?v=loop_scoring_v7"></script>
 </body>
 </html>

@@ -95,6 +95,10 @@ export class NotationRenderer {
     this.options[key] = value;
   }
 
+  setKeySignature(key) {
+    this.setOption('keySignature', key);
+  }
+
   setDisrupterMode(mode) {
     this.options.disrupterMode = mode;
   }
@@ -1291,6 +1295,8 @@ export class NotationRenderer {
     if (melodyChanged) {
       this.activeReviewMistakeIndex = -1;
       this.manualScrollOffset = 0;
+      this.playheadBeats = 0;
+      this.smoothScrollX = 0;
       this.clearNotes();
     }
 
@@ -1662,7 +1668,9 @@ export class NotationRenderer {
     let scrollX = 0;
 
     const isTimeDriven = (this.practiceData.mode === 'tempo' || this.practiceData.mode === 'strict' || this.practiceData.mode === 'first_read');
-    const playheadBeats = (this.practiceData.playheadBeats !== undefined) ? this.practiceData.playheadBeats : (this.playheadBeats || 0);
+    const playheadBeats = (this.playheadBeats !== undefined && this.playheadBeats !== null)
+      ? this.playheadBeats
+      : (this.practiceData.playheadBeats || 0);
 
     // Interpolate raw X position for any musical beat along score timeline
     const getXForBeat = (targetBeats) => {
@@ -1687,34 +1695,48 @@ export class NotationRenderer {
     };
 
     const playheadXRaw = getXForBeat(playheadBeats);
+    const activeTargetX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
 
-    if (totalMelodyWidth > availableWidth) {
-      if (isTimeDriven && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
-        // Continuous smooth auto-scrolling locked to the marching playhead
-        const focusX = notesStartX + availableWidth * 0.28;
-        scrollX = Math.max(0, playheadXRaw - focusX);
-      } else if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
-        const mistakeX = noteXPositions[this.activeReviewMistakeIndex];
-        const focusX = notesStartX + availableWidth * 0.38;
-        scrollX = Math.max(0, mistakeX - focusX);
-      } else {
-        const activeX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
-        const focusX = notesStartX + availableWidth * 0.28;
-        scrollX = Math.max(0, activeX - focusX);
-      }
-      const maxScroll = Math.max(0, totalMelodyWidth - availableWidth + 40);
-      scrollX = Math.min(scrollX, maxScroll);
+    // Anchor focal point close to the start of the music stave (after clefs/key signature)
+    // so notes begin shifting to the left as soon as the first note is struck!
+    const focusX = notesStartX + (isMobile ? 32 : 56);
+    const lastNoteX = (noteXPositions.length > 0) ? noteXPositions[noteXPositions.length - 1] : notesStartX;
+    const maxScroll = Math.max(0, lastNoteX - focusX + 60);
+
+    let targetScrollX = 0;
+    if (isTimeDriven && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
+      // Continuous smooth auto-scrolling locked to whichever is further ahead: playhead or active note
+      const leadX = Math.max(playheadXRaw, activeTargetX);
+      targetScrollX = Math.max(0, leadX - focusX);
+    } else if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
+      const mistakeX = noteXPositions[this.activeReviewMistakeIndex];
+      const reviewFocusX = notesStartX + (isMobile ? 40 : 80);
+      targetScrollX = Math.max(0, mistakeX - reviewFocusX);
+    } else if (isFinished) {
+      // Hold completed melody comfortably in view at final note position instead of jarringly resetting to 0
+      targetScrollX = Math.max(0, lastNoteX - focusX);
+    } else {
+      targetScrollX = Math.max(0, activeTargetX - focusX);
+    }
+    targetScrollX = Math.min(targetScrollX, maxScroll);
+
+    // Smooth interpolation to prevent abrupt visual jumps
+    if (this.smoothScrollX === undefined || isNaN(this.smoothScrollX) || Math.abs(this.smoothScrollX - targetScrollX) > 600) {
+      this.smoothScrollX = targetScrollX;
+    } else {
+      this.smoothScrollX += (targetScrollX - this.smoothScrollX) * 0.18;
     }
 
     // Apply manual drag / wheel offset
     if (isNaN(this.manualScrollOffset)) {
       this.manualScrollOffset = 0;
     }
-    const maxScrollLimit = Math.max(0, totalMelodyWidth - availableWidth + 40);
-    scrollX = Math.max(0, Math.min(maxScrollLimit, scrollX + this.manualScrollOffset));
+    const maxScrollLimit = Math.max(maxScroll, totalMelodyWidth - availableWidth + 40);
+    scrollX = Math.max(0, Math.min(maxScrollLimit, this.smoothScrollX + this.manualScrollOffset));
     if (isNaN(scrollX)) {
       scrollX = 0;
     }
+    this.scrollX = scrollX;
 
     const labelBaselineY = bassBottomY + lineSpacing * 1.05;
 
