@@ -178,17 +178,17 @@ export class DailyRoutineController {
         durationSeconds: 180, // 3 minutes
         bpm: excerpt.bpm || 96,
         type: 'audit',
-        waitMode: true,
+        waitMode: false,
         strictMode: false,
         audioMuted: true,
         exercise: excerpt,
-        methodology: 'Trace the melodic contour across the staff (steps vs leaps) with interval ribbons. Do NOT name note letters. Silently pre-finger keys on your instrument without blowing/striking.',
+        methodology: 'Trace melodic contours with interval ribbons. Silently pre-finger keys on your instrument with the steady metronome pacer, or drag the staff with your mouse / wheel to inspect intervals.',
         objective: 'Train your brain to recognize spatial intervals and melodic contours instantly, and physically pre-map key movements without audio distraction.',
         neuroscience: 'Naming note letters (C-D-E) in your head adds a 200ms processing bottleneck. Sight-reading masters translate visual contour (steps vs leaps) directly to finger distance.',
         howTo: [
-          'Synth audio is muted. Silently trace the colored interval ribbons (Green=Step, Orange=Third, Purple=Leap).',
-          'Ghost-finger: Silently pre-touch the keys on your instrument without striking or blowing.',
-          'Identify the highest note, lowest note, and cadence points before moving on.'
+          'Steady metronome paces your silent ghost-fingering across the score (synth audio is muted).',
+          'Drag the staff with your mouse, scroll wheel, or arrow keys (← / →) to inspect measures at your own pace.',
+          'Ghost-finger: Silently pre-touch keys on your instrument without blowing/striking. Double-click canvas to re-center.'
         ],
         pitfalls: 'Saying note letter names in your head or stopping to think about note spelling.',
         proTip: 'Trust your visual spatial awareness: step = neighbor key, skip = skip one key, leap = jump.'
@@ -610,6 +610,7 @@ export class DailyRoutineController {
 
     // Configure Trainer
     if (this.trainer && exercise) {
+      this.trainer.isAuditMode = (phase.type === 'audit');
       this.trainer.rhythmTapMode = (phase.type === 'rhythm_tap');
       if (phase.type === 'rhythm_tap') {
         this.trainer.expectedTapMidi = (exercise.notes && exercise.notes.length > 0) ? exercise.notes[0].midi : 60;

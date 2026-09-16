@@ -97,6 +97,7 @@ export class MelodyTrainer {
     // Rhythm Tap & Subdivision Mode (Paul Harris Method: tap single pitch or written pitch in tempo)
     this.rhythmTapMode = false;
     this.expectedTapMidi = null;
+    this.isAuditMode = false;
 
     // Load default melody
     this.loadMelody(this.melodies[0].id);
@@ -583,24 +584,29 @@ export class MelodyTrainer {
           const noteExpiryTime = noteExpectedTime + noteDurationMs + graceMs;
 
           if (now > noteExpiryTime) {
-            // Note expired without being struck -> Auto-advance as Missed
+            // Note expired without being struck -> Auto-advance as Missed or Ghost-Fingered (Audit)
             const currentSlot = this.noteResults[this.noteIndex];
             if (currentSlot && currentSlot.status === 'pending') {
-              currentSlot.status = 'missed';
-              currentSlot.timing = { rating: 'missed', offsetMs: null, text: 'Missed' };
+              if (this.isAuditMode) {
+                currentSlot.status = 'reviewed';
+                currentSlot.timing = { rating: 'audit', offsetMs: null, text: '👀 Ghost-Fingered' };
+              } else {
+                currentSlot.status = 'missed';
+                currentSlot.timing = { rating: 'missed', offsetMs: null, text: 'Missed' };
 
-              this.stats.missedNotes++;
-              this.stats.offBeatHits++;
-              this.stats.streak = 0;
-              this.previousNoteMissedOrMistake = true;
-              this.calculateAccuracy();
+                this.stats.missedNotes++;
+                this.stats.offBeatHits++;
+                this.stats.streak = 0;
+                this.previousNoteMissedOrMistake = true;
+                this.calculateAccuracy();
 
-              if (this.onTimingFeedback) {
-                this.onTimingFeedback({
-                  rating: 'missed',
-                  offsetMs: null,
-                  text: '🔴 Missed'
-                });
+                if (this.onTimingFeedback) {
+                  this.onTimingFeedback({
+                    rating: 'missed',
+                    offsetMs: null,
+                    text: '🔴 Missed'
+                  });
+                }
               }
             }
 
@@ -1000,6 +1006,12 @@ export class MelodyTrainer {
   }
 
   calculateAccuracy() {
+    if (this.isAuditMode) {
+      this.stats.accuracy = 100;
+      this.stats.rhythmAccuracy = 100;
+      this.stats.sightReadingScore = 100;
+      return;
+    }
     // Pitch Accuracy: (correct / total attempts + missed)
     const pitchDenominator = this.stats.correctNotes + this.stats.mistakeCount + this.stats.missedNotes;
     if (pitchDenominator === 0) {

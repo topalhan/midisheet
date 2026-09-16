@@ -154,23 +154,32 @@ export class NotationRenderer {
       }
 
       // 4. Score horizontal drag panning
-      if (this.options.mode === 'practice') {
+      if (this.options.mode === 'practice' || this.practiceData) {
         this.isUserDragging = true;
         this.dragStartX = pos.x;
         this.dragStartScroll = this.manualScrollOffset;
+        this.canvas.style.cursor = 'grabbing';
         try { this.canvas.setPointerCapture?.(e.pointerId); } catch (_) {}
       }
     });
 
     this.canvas.addEventListener('pointermove', (e) => {
-      if (!this.isUserDragging) return;
-      const pos = getPos(e);
-      const deltaX = pos.x - this.dragStartX;
-      this.manualScrollOffset = this.dragStartScroll - deltaX;
+      if (this.isUserDragging) {
+        const pos = getPos(e);
+        const deltaX = pos.x - this.dragStartX;
+        this.manualScrollOffset = this.dragStartScroll - deltaX;
+      } else if (this.options.mode === 'practice' || this.practiceData) {
+        this.canvas.style.cursor = 'grab';
+      }
     });
 
     const endDrag = (e) => {
       this.isUserDragging = false;
+      if (this.options.mode === 'practice' || this.practiceData) {
+        this.canvas.style.cursor = 'grab';
+      } else {
+        this.canvas.style.cursor = 'default';
+      }
       try { this.canvas.releasePointerCapture?.(e.pointerId); } catch (_) {}
     };
 
@@ -179,13 +188,39 @@ export class NotationRenderer {
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
 
+    // Mouse wheel / trackpad horizontal scrolling
     this.canvas.addEventListener('wheel', (e) => {
-      if (this.options.mode === 'practice') {
+      if (this.options.mode === 'practice' || this.practiceData) {
         e.preventDefault();
         const delta = (Math.abs(e.deltaX) > 0.001 ? e.deltaX : e.deltaY) * 0.8;
         this.manualScrollOffset += delta;
       }
     }, { passive: false });
+
+    // Double click to reset / re-center score
+    this.canvas.addEventListener('dblclick', (e) => {
+      if (this.options.mode === 'practice' || this.practiceData) {
+        e.preventDefault();
+        this.manualScrollOffset = 0;
+      }
+    });
+
+    // Keyboard Arrow navigation for inspecting score
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      if (this.options.mode === 'practice' || this.practiceData) {
+        if (e.code === 'ArrowLeft') {
+          this.manualScrollOffset = Math.max(0, this.manualScrollOffset - 80);
+          e.preventDefault();
+        } else if (e.code === 'ArrowRight') {
+          this.manualScrollOffset += 80;
+          e.preventDefault();
+        } else if (e.code === 'Home') {
+          this.manualScrollOffset = 0;
+          e.preventDefault();
+        }
+      }
+    });
   }
 
   getMistakeNoteIndices() {
@@ -1755,10 +1790,9 @@ export class NotationRenderer {
     }
     targetScrollX = Math.min(targetScrollX, maxScroll);
 
-    // Immediate zero-snap when starting from the top (note 0) of an active playthrough
-    if (currentIdx === 0 && !isFinished && !this.isUserDragging) {
+    // Immediate zero-align when starting from top of playthrough without manual panning
+    if (currentIdx === 0 && !isFinished && !this.isUserDragging && this.manualScrollOffset === 0) {
       this.smoothScrollX = 0;
-      this.manualScrollOffset = 0;
       this.activeReviewMistakeIndex = -1;
       targetScrollX = 0;
     }
@@ -1924,6 +1958,8 @@ export class NotationRenderer {
       } else if (isPast) {
         if (hadMistakes) {
           noteColor = '#f43f5e'; // Rose if mistake was made
+        } else if (res && res.status === 'reviewed') {
+          noteColor = '#38bdf8'; // Sky blue for ghost-fingered / audited notes
         } else if (res && res.timing && Math.abs(res.timing.offsetMs) > 100) {
           noteColor = '#f59e0b'; // Amber for loose timing
         } else {

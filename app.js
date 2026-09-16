@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.2058';
+export const BUILD_ID = '20260915.2115';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.2058';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.2058';
+import { NotationRenderer } from './notation.js?v=20260915.2115';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.2058';
+import { MelodyTrainer } from './trainer.js?v=20260915.2115';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.2058';
+import { DailyRoutineController } from './routine.js?v=20260915.2115';
 
 class App {
   constructor() {
