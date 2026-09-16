@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.2005';
+export const BUILD_ID = '20260915.2008';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.2005';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.2005';
+import { NotationRenderer } from './notation.js?v=20260915.2008';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.2005';
+import { MelodyTrainer } from './trainer.js?v=20260915.2008';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.2005';
+import { DailyRoutineController } from './routine.js?v=20260915.2008';
 
 class App {
   constructor() {
@@ -146,6 +146,9 @@ class App {
     this.routinePhaseBadge = document.getElementById('routine-phase-badge');
     this.routinePhaseTitle = document.getElementById('routine-phase-title');
     this.routinePhaseInstructions = document.getElementById('routine-phase-instructions');
+    this.routineGhostFingeringBox = document.getElementById('routine-ghost-fingering-box');
+    this.ghostFingeringAlert = document.getElementById('ghost-fingering-alert');
+    this.ghostFingeringTimeout = null;
     this.routineRhythmTapBox = document.getElementById('routine-rhythm-tap-box');
     this.btnRoutineTap = document.getElementById('btn-routine-tap');
     this.routineTapFeedback = document.getElementById('routine-tap-feedback');
@@ -302,6 +305,12 @@ class App {
 
   handleBreathEvent(breathNorm, source) {
     this.breathPressure = breathNorm;
+
+    // Ghost-fingering reminder in Block 2 Part 2 (Audit mode)
+    const currentRoutinePhase = this.routine?.getCurrentPhase();
+    if (this.appMode === 'routine' && currentRoutinePhase?.type === 'audit' && breathNorm > 0.12) {
+      this.triggerGhostFingeringAlert();
+    }
 
     // Update UI breath meter
     if (this.breathMeterBar) {
@@ -641,6 +650,15 @@ class App {
   handleNoteOn(midi, velocity = 100, source = 'User') {
     if (midi < 0 || midi > 127) return;
 
+    // Intercept playing in Block 2 Part 2 (Visual Interval Audit & Ghost-Fingering)
+    const currentPhase = this.routine?.getCurrentPhase();
+    if (this.appMode === 'routine' && currentPhase?.type === 'audit') {
+      this.triggerGhostFingeringAlert(midi);
+      // Still show key active on virtual piano so user sees what note they touched!
+      this.setKeyActive(midi, true, velocity);
+      return;
+    }
+
     // If this exact pitch is already marked active, release it first so re-attacks cleanly trigger
     if (this.activeNotes.has(midi)) {
       this.handleNoteOff(midi, 'Re-attack');
@@ -694,6 +712,13 @@ class App {
    */
   handleNoteOff(midi, source = 'User') {
     if (midi < 0 || midi > 127) return;
+
+    const currentPhase = this.routine?.getCurrentPhase();
+    if (this.appMode === 'routine' && currentPhase?.type === 'audit') {
+      this.activeNotes.delete(midi);
+      this.setKeyActive(midi, false);
+      return;
+    }
 
     // Guaranteed complete note release: fixes stuck notes caused by counter mismatches
     this.activeNotes.delete(midi);
@@ -1842,6 +1867,22 @@ class App {
       }
 
       // Toggle Context Panels
+      if (this.routineGhostFingeringBox) {
+        if (phase.type === 'audit') {
+          this.routineGhostFingeringBox.classList.remove('hidden');
+          this.resetGhostFingeringBoxState();
+        } else {
+          this.routineGhostFingeringBox.classList.add('hidden');
+        }
+      }
+      if (this.ghostFingeringAlert && phase.type !== 'audit') {
+        this.ghostFingeringAlert.classList.add('hidden');
+        if (this.ghostFingeringTimeout) {
+          clearTimeout(this.ghostFingeringTimeout);
+          this.ghostFingeringTimeout = null;
+        }
+      }
+
       if (this.routineRhythmTapBox) {
         if (phase.type === 'rhythm_tap') {
           this.routineRhythmTapBox.classList.remove('hidden');
@@ -1974,6 +2015,50 @@ class App {
     this.routine.onComplete = (summary) => {
       this.openRoutineCompleteModal(summary);
     };
+  }
+
+  triggerGhostFingeringAlert(midi = null) {
+    // 1. Show floating on-screen alert banner over staff
+    if (this.ghostFingeringAlert) {
+      this.ghostFingeringAlert.classList.remove('hidden');
+      if (this.ghostFingeringTimeout) {
+        clearTimeout(this.ghostFingeringTimeout);
+      }
+      this.ghostFingeringTimeout = setTimeout(() => {
+        this.ghostFingeringAlert?.classList.add('hidden');
+        this.resetGhostFingeringBoxState();
+      }, 3500);
+    }
+
+    // 2. Pulse the action container badge
+    if (this.routineGhostFingeringBox) {
+      this.routineGhostFingeringBox.classList.remove('bg-amber-500/15', 'border-amber-500/40');
+      this.routineGhostFingeringBox.classList.add('bg-rose-500/25', 'border-rose-500/60');
+      const statusEl = document.getElementById('routine-ghost-fingering-status');
+      if (statusEl) {
+        const noteName = midi !== null ? ` (${MusicTheory.getNoteInfo(midi, this.preferFlats).fullName})` : '';
+        statusEl.innerHTML = `<span class="text-rose-300 font-extrabold">⚠️ MIDI Detected${noteName}! Don't play — silent only!</span>`;
+      }
+    }
+
+    // 3. Update practice feedback text if available
+    if (this.practiceFeedbackText) {
+      this.practiceFeedbackText.innerHTML = '<span class="text-rose-400 font-bold">🤫 Ghost-Fingering: Do NOT play notes! (Silent touch only)</span>';
+    }
+  }
+
+  resetGhostFingeringBoxState() {
+    if (this.routineGhostFingeringBox) {
+      this.routineGhostFingeringBox.classList.remove('bg-rose-500/25', 'border-rose-500/60');
+      this.routineGhostFingeringBox.classList.add('bg-amber-500/15', 'border-amber-500/40');
+      const statusEl = document.getElementById('routine-ghost-fingering-status');
+      if (statusEl) {
+        statusEl.innerHTML = '<span class="text-amber-300 font-semibold">Silent Practice (Do Not Play)</span>';
+      }
+    }
+    if (this.practiceFeedbackText && this.routine?.getCurrentPhase()?.type === 'audit') {
+      this.practiceFeedbackText.innerText = 'Silently pre-touch keys on your instrument to feel intervals';
+    }
   }
 
   openRoutineCompleteModal(summary) {
