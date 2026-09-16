@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.2008';
+export const BUILD_ID = '20260915.2027';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.2008';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.2008';
+import { NotationRenderer } from './notation.js?v=20260915.2027';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.2008';
+import { MelodyTrainer } from './trainer.js?v=20260915.2027';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.2008';
+import { DailyRoutineController } from './routine.js?v=20260915.2027';
 
 class App {
   constructor() {
@@ -1853,6 +1853,8 @@ class App {
       if (this.routineRoundHistory) {
         this.routineRoundHistory.innerHTML = '';
       }
+      this.notation?.resetScoreToBeginning();
+      this.scrollToStaff();
 
       // Update 4-Block Pills
       for (let b = 1; b <= 4; b++) {
@@ -2044,6 +2046,13 @@ class App {
     // 3. Update practice feedback text if available
     if (this.practiceFeedbackText) {
       this.practiceFeedbackText.innerHTML = '<span class="text-rose-400 font-bold">🤫 Ghost-Fingering: Do NOT play notes! (Silent touch only)</span>';
+    }
+  }
+
+  scrollToStaff() {
+    const target = document.getElementById('routine-action-container') || document.querySelector('.staff-card') || document.getElementById('staff-canvas');
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }
 
@@ -2335,7 +2344,9 @@ class App {
       this.routine?.reset();
     });
     this.btnRoutineRestartExercise?.addEventListener('click', () => {
+      this.notation?.resetScoreToBeginning();
       this.routine?.restartCurrentSubPhase();
+      this.scrollToStaff();
     });
     this.btnRoutineFinishExercise?.addEventListener('click', () => {
       this.routine?.finishCurrentSubPhaseEarly();
@@ -2364,12 +2375,16 @@ class App {
     // Sub-Phase Transition Modal Listeners
     this.btnPhaseCompleteContinue?.addEventListener('click', () => {
       this.closeSubPhaseCompleteModal();
+      this.notation?.resetScoreToBeginning();
       this.routine?.continueToNextSubPhase();
+      this.scrollToStaff();
     });
 
     this.btnPhaseCompleteRepeat?.addEventListener('click', () => {
       this.closeSubPhaseCompleteModal();
+      this.notation?.resetScoreToBeginning();
       this.routine?.repeatCurrentSubPhase();
+      this.scrollToStaff();
     });
 
     this.btnPhaseCompleteGuide?.addEventListener('click', () => {

@@ -1283,6 +1283,10 @@ export class NotationRenderer {
   setPracticeState(data) {
     const melodyChanged = (!this.practiceData && data) || (this.practiceData && data && this.practiceData.melody?.id !== data.melody?.id);
     const becameFinished = (!this.practiceData?.isFinished && data?.isFinished);
+    const isRestarted = (!data?.isFinished && (
+      this.practiceData?.isFinished ||
+      (data?.noteIndex === 0 && (this.practiceData?.noteIndex > 0 || (this.smoothScrollX && this.smoothScrollX > 0) || this.manualScrollOffset !== 0 || this.activeReviewMistakeIndex >= 0))
+    ));
 
     this.practiceData = data;
     if (data) {
@@ -1292,11 +1296,15 @@ export class NotationRenderer {
       }
     }
 
-    if (melodyChanged) {
+    if (melodyChanged || isRestarted) {
       this.activeReviewMistakeIndex = -1;
       this.manualScrollOffset = 0;
       this.playheadBeats = 0;
       this.smoothScrollX = 0;
+      this.scrollX = 0;
+      this.prevMistakeBtnBounds = null;
+      this.nextMistakeBtnBounds = null;
+      this.reviewPillBounds = null;
       this.clearNotes();
     }
 
@@ -1309,6 +1317,19 @@ export class NotationRenderer {
       }
     }
 
+    this.ensureRenderLoop();
+  }
+
+  resetScoreToBeginning() {
+    this.activeReviewMistakeIndex = -1;
+    this.manualScrollOffset = 0;
+    this.playheadBeats = 0;
+    this.smoothScrollX = 0;
+    this.scrollX = 0;
+    this.prevMistakeBtnBounds = null;
+    this.nextMistakeBtnBounds = null;
+    this.reviewPillBounds = null;
+    this.clearNotes();
     this.ensureRenderLoop();
   }
 
@@ -1719,6 +1740,14 @@ export class NotationRenderer {
       targetScrollX = Math.max(0, activeTargetX - focusX);
     }
     targetScrollX = Math.min(targetScrollX, maxScroll);
+
+    // Immediate zero-snap when starting from the top (note 0) of an active playthrough
+    if (currentIdx === 0 && !isFinished && !this.isUserDragging) {
+      this.smoothScrollX = 0;
+      this.manualScrollOffset = 0;
+      this.activeReviewMistakeIndex = -1;
+      targetScrollX = 0;
+    }
 
     // Smooth interpolation to prevent abrupt visual jumps
     if (this.smoothScrollX === undefined || isNaN(this.smoothScrollX) || Math.abs(this.smoothScrollX - targetScrollX) > 600) {
