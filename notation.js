@@ -176,6 +176,8 @@ export class NotationRenderer {
 
     this.canvas.addEventListener('pointerup', endDrag);
     this.canvas.addEventListener('pointercancel', endDrag);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
 
     this.canvas.addEventListener('wheel', (e) => {
       if (this.options.mode === 'practice') {
@@ -1718,26 +1720,38 @@ export class NotationRenderer {
     const playheadXRaw = getXForBeat(playheadBeats);
     const activeTargetX = (currentIdx >= 0 && currentIdx < totalNotes) ? noteXPositions[currentIdx] : notesStartX;
 
-    // Anchor focal point close to the start of the music stave (after clefs/key signature)
-    // so notes begin shifting to the left as soon as the first note is struck!
-    const focusX = notesStartX + (isMobile ? 32 : 56);
+    // Sight-reading focal anchor: keep active note comfortably positioned around 25-32% from the left,
+    // leaving ample room ahead (~65-75% of staff width) to read upcoming notes.
+    const focalAnchorX = notesStartX + Math.min(isMobile ? 120 : 250, Math.max(70, availableWidth * 0.28));
     const lastNoteX = (noteXPositions.length > 0) ? noteXPositions[noteXPositions.length - 1] : notesStartX;
-    const maxScroll = Math.max(0, lastNoteX - focusX + 60);
+    const maxScroll = Math.max(0, lastNoteX - focalAnchorX + 60);
+
+    // Minimum safety lookahead buffer: active note must NEVER be closer to the right staff boundary than this
+    const minLookaheadRight = Math.min(isMobile ? 160 : 320, Math.max(120, availableWidth * 0.38));
+    const maxAllowedScreenX = staffRightX - minLookaheadRight;
 
     let targetScrollX = 0;
     if (isTimeDriven && !isFinished && !this.practiceData.isCountingIn && !this.practiceData.isAnalyzing) {
       // Continuous smooth auto-scrolling locked to whichever is further ahead: playhead or active note
       const leadX = Math.max(playheadXRaw, activeTargetX);
-      targetScrollX = Math.max(0, leadX - focusX);
+      targetScrollX = Math.max(0, leadX - focalAnchorX);
     } else if (isFinished && this.activeReviewMistakeIndex >= 0 && this.activeReviewMistakeIndex < totalNotes) {
       const mistakeX = noteXPositions[this.activeReviewMistakeIndex];
       const reviewFocusX = notesStartX + (isMobile ? 40 : 80);
       targetScrollX = Math.max(0, mistakeX - reviewFocusX);
     } else if (isFinished) {
       // Hold completed melody comfortably in view at final note position instead of jarringly resetting to 0
-      targetScrollX = Math.max(0, lastNoteX - focusX);
+      targetScrollX = Math.max(0, lastNoteX - focalAnchorX);
     } else {
-      targetScrollX = Math.max(0, activeTargetX - focusX);
+      // In wait mode / interactive note reading:
+      // When at the beginning (<= focalAnchorX), keep score resting stably at 0.
+      // As notes advance past focalAnchorX, scroll smoothly to keep active note comfortably anchored.
+      targetScrollX = Math.max(0, activeTargetX - focalAnchorX);
+    }
+
+    // Right-Edge Safety Horizon: If active note would ever get too close to the right edge, scroll immediately
+    if (!isFinished && activeTargetX - targetScrollX > maxAllowedScreenX) {
+      targetScrollX = Math.max(targetScrollX, activeTargetX - maxAllowedScreenX);
     }
     targetScrollX = Math.min(targetScrollX, maxScroll);
 
@@ -1753,7 +1767,12 @@ export class NotationRenderer {
     if (this.smoothScrollX === undefined || isNaN(this.smoothScrollX) || Math.abs(this.smoothScrollX - targetScrollX) > 600) {
       this.smoothScrollX = targetScrollX;
     } else {
-      this.smoothScrollX += (targetScrollX - this.smoothScrollX) * 0.18;
+      this.smoothScrollX += (targetScrollX - this.smoothScrollX) * 0.22;
+    }
+
+    // Hard safety enforcement: under no circumstances allow active target note to be drawn past maxAllowedScreenX
+    if (!isFinished && activeTargetX - this.smoothScrollX > maxAllowedScreenX) {
+      this.smoothScrollX = activeTargetX - maxAllowedScreenX;
     }
 
     // Apply manual drag / wheel offset
