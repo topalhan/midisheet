@@ -460,6 +460,16 @@ export class DailyRoutineController {
     this.startOrResume();
   }
 
+  restartCurrentSubPhase() {
+    this.subPhaseElapsedSeconds = 0;
+    this.loadSubPhase(this.currentSubPhaseIndex, true, false);
+    this.startOrResume();
+  }
+
+  finishCurrentSubPhaseEarly() {
+    this.pauseForSubPhaseTransition();
+  }
+
   getCurrentSubPhaseStats() {
     const phase = this.getCurrentPhase();
     if (!phase) return null;

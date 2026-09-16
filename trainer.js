@@ -944,6 +944,48 @@ export class MelodyTrainer {
           this.onNoteMistake(this.noteIndex, expectedInfo, playedInfo);
         }
 
+        // Forward progression check in Wait mode:
+        // If the note struck matches the NEXT expected note in the melody,
+        // the user has progressed past the mistaken note rather than stopping to correct it.
+        const nextIndex = this.noteIndex + 1;
+        const nextTarget = (nextIndex < this.currentMelody.notes.length) ? this.currentMelody.notes[nextIndex] : null;
+
+        if (nextTarget && midi === nextTarget.midi) {
+          // Advance to next note and register this strike as the hit for next note!
+          this.noteIndex = nextIndex;
+          const nextSlot = this.noteResults[this.noteIndex];
+          nextSlot.status = 'correct';
+          nextSlot.playedMidi = midi;
+          this.stats.correctNotes++;
+          this.stats.streak++;
+          if (this.stats.streak > this.stats.bestStreak) {
+            this.stats.bestStreak = this.stats.streak;
+          }
+          this.calculateAccuracy();
+
+          if (this.onTimingFeedback) {
+            this.onTimingFeedback({
+              rating: 'good',
+              offsetMs: null,
+              text: `✓ Advanced to ${MusicTheory.getNoteInfo(midi).fullName}`
+            });
+          }
+
+          if (this.onNoteSuccess) {
+            this.onNoteSuccess(this.noteIndex, nextTarget, true, { rating: 'good', offsetMs: 0 });
+          }
+
+          this.lastCompletedTime = now;
+          this.noteIndex++;
+
+          if (this.noteIndex >= this.currentMelody.notes.length) {
+            this.finishMelody();
+          } else {
+            this.notifyState();
+          }
+          return;
+        }
+
         this.notifyState();
       }
     }

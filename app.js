@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.1952';
+export const BUILD_ID = '20260915.2005';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.1952';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.1952';
+import { NotationRenderer } from './notation.js?v=20260915.2005';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.1952';
+import { MelodyTrainer } from './trainer.js?v=20260915.2005';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.1952';
+import { DailyRoutineController } from './routine.js?v=20260915.2005';
 
 class App {
   constructor() {
@@ -140,6 +140,8 @@ class App {
     this.btnRoutinePlayText = document.getElementById('btn-routine-play-text');
     this.btnRoutineSkip = document.getElementById('btn-routine-skip');
     this.btnRoutineReset = document.getElementById('btn-routine-reset');
+    this.btnRoutineRestartExercise = document.getElementById('btn-routine-restart-exercise');
+    this.btnRoutineFinishExercise = document.getElementById('btn-routine-finish-exercise');
     this.routineMasterProgressBar = document.getElementById('routine-master-progressbar');
     this.routinePhaseBadge = document.getElementById('routine-phase-badge');
     this.routinePhaseTitle = document.getElementById('routine-phase-title');
@@ -2246,6 +2248,12 @@ class App {
     });
     this.btnRoutineReset?.addEventListener('click', () => {
       this.routine?.reset();
+    });
+    this.btnRoutineRestartExercise?.addEventListener('click', () => {
+      this.routine?.restartCurrentSubPhase();
+    });
+    this.btnRoutineFinishExercise?.addEventListener('click', () => {
+      this.routine?.finishCurrentSubPhaseEarly();
     });
 
     // Routine Rhythm Tap Button
