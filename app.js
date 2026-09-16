@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.2045';
+export const BUILD_ID = '20260915.2048';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.2045';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.2045';
+import { NotationRenderer } from './notation.js?v=20260915.2048';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.2045';
+import { MelodyTrainer } from './trainer.js?v=20260915.2048';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.2045';
+import { DailyRoutineController } from './routine.js?v=20260915.2048';
 
 class App {
   constructor() {
@@ -2646,12 +2646,21 @@ class App {
       });
     }
 
-    // Instrument Preset (with No Sound support for EWI / hardware audio)
+    // Instrument Preset (defaulting to 'none': No Sound for EWI / hardware audio)
     const presetSelect = document.getElementById('select-instrument');
     const presetSelectModal = document.getElementById('select-instrument-modal');
 
+    // Restore saved instrument preset or default to 'none'
+    const savedPreset = localStorage.getItem('midisheet_instrument_preset') || 'none';
+    this.audio.setPreset(savedPreset);
+    if (presetSelect) presetSelect.value = savedPreset;
+    if (presetSelectModal) presetSelectModal.value = savedPreset;
+
     const handlePresetChange = (val) => {
       this.audio.setPreset(val);
+      try {
+        localStorage.setItem('midisheet_instrument_preset', val);
+      } catch (_) {}
       if (presetSelect && presetSelect.value !== val) presetSelect.value = val;
       if (presetSelectModal && presetSelectModal.value !== val) presetSelectModal.value = val;
       if (val === 'none') {

@@ -516,9 +516,9 @@
         <div class="flex items-center gap-1.5">
           <label class="text-slate-400 font-medium">Sound:</label>
           <select id="select-instrument" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2.5 py-1 text-xs">
-            <option value="none">🔇 No Sound (Hardware / EWI Audio)</option>
+            <option value="none" selected>🔇 No Sound (Hardware / EWI Audio)</option>
             <optgroup label="🎹 Keyboards & Organs">
-              <option value="grandPiano" selected>Grand Piano (Acoustic)</option>
+              <option value="grandPiano">Grand Piano (Acoustic)</option>
               <option value="electricPiano">Electric Piano (Rhodes)</option>
               <option value="organ">Drawbar Organ</option>
               <option value="strings">Synth Strings / Pad</option>
@@ -1165,9 +1165,9 @@
           <div>
             <label class="text-[11px] text-slate-400 block mb-1">Web Synthesizer Preset:</label>
             <select id="select-instrument-modal" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-sky-500">
-              <option value="none">🔇 No Sound (Hardware / EWI Internal Audio)</option>
+              <option value="none" selected>🔇 No Sound (Hardware / EWI Internal Audio)</option>
               <optgroup label="🎹 Keyboards & Organs">
-                <option value="grandPiano" selected>Grand Piano (Acoustic)</option>
+                <option value="grandPiano">Grand Piano (Acoustic)</option>
                 <option value="electricPiano">Electric Piano (Rhodes)</option>
                 <option value="organ">Drawbar Organ</option>
                 <option value="strings">Synth Strings / Pad</option>
@@ -1241,7 +1241,7 @@
           </span>
           <div class="flex items-center justify-between pt-1">
             <span class="text-slate-300 text-xs">Build ID:</span>
-            <span id="settings-build-id" class="font-mono text-xs text-sky-400 font-bold bg-slate-900 border border-slate-700/80 px-2.5 py-0.5 rounded select-all tracking-wider">20260915.2045</span>
+            <span id="settings-build-id" class="font-mono text-xs text-sky-400 font-bold bg-slate-900 border border-slate-700/80 px-2.5 py-0.5 rounded select-all tracking-wider">20260915.2048</span>
           </div>
           <p class="text-[11px] text-slate-400">Deployment build identifier formatted as YYYYMMDD.HHMM.</p>
         </div>
@@ -1250,7 +1250,7 @@
       <div class="p-3 border-t border-slate-800 flex items-center justify-between bg-slate-900/60">
         <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
           <span>Build:</span>
-          <span class="font-mono text-slate-300 font-semibold">20260915.2045</span>
+          <span class="font-mono text-slate-300 font-semibold">20260915.2048</span>
         </div>
         <button id="btn-settings-done" class="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-sm transition-colors">
           Done
@@ -1263,6 +1263,6 @@
     MidiSheet • Real-time Web MIDI Music Notation, Trainer & Synthesizer
   </footer>
 
-  <script type="module" src="./app.js?v=20260915.2045"></script>
+  <script type="module" src="./app.js?v=20260915.2048"></script>
 </body>
 </html>

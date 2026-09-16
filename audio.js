@@ -20,7 +20,7 @@ export class AudioEngine {
     this.activeVoices = new Map(); // midiNote -> Voice object
     this.sustainedVoices = new Set(); // Set of midiNotes kept alive by sustain pedal
 
-    this.preset = 'grandPiano'; // 'grandPiano', 'electricPiano', 'strings', 'organ', 'flute', 'clarinet', 'saxophone', 'trumpet', 'ewiLead'
+    this.preset = 'none'; // Default to 'none' (No Sound for Hardware / EWI Audio) // 'grandPiano', 'electricPiano', 'strings', 'organ', 'flute', 'clarinet', 'saxophone', 'trumpet', 'ewiLead'
     this.volume = 0.8;
     this.lowLatencyMode = true; // Enabled by default for instantaneous note onset on tempo
     this.reverbEnabled = false; // Dry by default in low-latency mode to eliminate FFT convolution overhead
