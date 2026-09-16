@@ -1,4 +1,4 @@
-export const BUILD_ID = '20260915.2048';
+export const BUILD_ID = '20260915.2058';
 /**
  * Main Application Coordinator
  * Integrates NotationRenderer, AudioEngine, MidiManager, Virtual Piano Keyboard,
@@ -6,13 +6,13 @@ export const BUILD_ID = '20260915.2048';
  */
 
 import { MusicTheory } from './chords.js';
-import { NotationRenderer } from './notation.js?v=20260915.2048';
+import { NotationRenderer } from './notation.js?v=20260915.2058';
 import { AudioEngine } from './audio.js';
 import { MidiManager } from './midi.js';
-import { MelodyTrainer } from './trainer.js?v=20260915.2048';
+import { MelodyTrainer } from './trainer.js?v=20260915.2058';
 import { MELODIES } from './melodies.js';
 import { parseMidiFile, inspectMidiChannels } from './midiparser.js';
-import { DailyRoutineController } from './routine.js?v=20260915.2048';
+import { DailyRoutineController } from './routine.js?v=20260915.2058';
 
 class App {
   constructor() {
@@ -685,6 +685,17 @@ class App {
     // Visual piano key
     this.setKeyActive(midi, true, velocity);
 
+    if (source === 'Virtual Piano') {
+      const noteInfo = MusicTheory.getNoteInfo(midi);
+      this.addMidiLogEntry({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'Note On',
+        source: 'Virtual Piano',
+        detail: `${noteInfo.fullName} (Note ${midi}), Vel ${velocity}`,
+        raw: `0x90 0x${midi.toString(16).toUpperCase().padStart(2, '0')} 0x${velocity.toString(16).toUpperCase().padStart(2, '0')}`
+      });
+    }
+
     if (this.appMode === 'practice' || this.appMode === 'routine') {
       const playedInfo = MusicTheory.getNoteInfo(midi, this.preferFlats);
       if (this.practicePlayedNote) {
@@ -725,6 +736,17 @@ class App {
     this.notation.noteOff(midi);
     this.audio.noteOff(midi);
     this.setKeyActive(midi, false);
+
+    if (source === 'Virtual Piano') {
+      const noteInfo = MusicTheory.getNoteInfo(midi);
+      this.addMidiLogEntry({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'Note Off',
+        source: 'Virtual Piano',
+        detail: `${noteInfo.fullName} (Note ${midi})`,
+        raw: `0x80 0x${midi.toString(16).toUpperCase().padStart(2, '0')} 0x00`
+      });
+    }
 
     if (this.appMode === 'practice' || this.appMode === 'routine') {
       this.trainer.onNoteReleased(midi);
@@ -1771,19 +1793,60 @@ class App {
   addMidiLogEntry(entry) {
     if (!this.midiLogContainer) return;
 
+    if (!this.midiLogHistory) {
+      this.midiLogHistory = [];
+    }
+    this.midiLogHistory.push({
+      timestamp: entry.timestamp || new Date().toLocaleTimeString(),
+      type: entry.type || 'Event',
+      source: entry.source || 'MIDI In',
+      detail: entry.detail || '',
+      raw: entry.raw || ''
+    });
+    // Keep last 500 events in memory for comprehensive debugging export
+    if (this.midiLogHistory.length > 500) {
+      this.midiLogHistory.shift();
+    }
+
+    // Remove placeholder message if present
+    const placeholder = this.midiLogContainer.querySelector('.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+
+    const isNoteOn = entry.type === 'Note On';
+    const isNoteOff = entry.type === 'Note Off';
+    const isControl = entry.type.includes('CC') || entry.type.includes('Pedal') || entry.type.includes('Breath') || entry.type.includes('Pressure') || entry.type.includes('Bend');
+
+    let badgeClass = 'text-sky-400 bg-sky-950/60 border-sky-800/50';
+    let detailClass = 'text-slate-200';
+    if (isNoteOn) {
+      badgeClass = 'text-emerald-300 bg-emerald-950/70 border-emerald-700/60 font-bold';
+      detailClass = 'text-emerald-300 font-semibold';
+    } else if (isNoteOff) {
+      badgeClass = 'text-slate-400 bg-slate-900/60 border-slate-700/40';
+      detailClass = 'text-slate-400';
+    } else if (isControl) {
+      badgeClass = 'text-amber-300 bg-amber-950/60 border-amber-700/50';
+      detailClass = 'text-amber-200 font-medium';
+    }
+
     const row = document.createElement('div');
-    row.className = 'log-entry flex items-center justify-between text-xs py-1 border-b border-slate-700/40 text-slate-300 font-mono';
+    row.className = 'log-entry flex items-center justify-between text-xs py-1 border-b border-slate-800/60 font-mono hover:bg-slate-900/50 px-1.5 rounded transition-colors';
     row.innerHTML = `
-      <span class="text-slate-500 w-16">${entry.timestamp || ''}</span>
-      <span class="font-semibold text-sky-400 w-24">${entry.type}</span>
-      <span class="text-slate-300 flex-1 truncate">${entry.detail}</span>
-      <span class="text-slate-500 text-[10px]">${entry.raw || ''}</span>
+      <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
+        <span class="text-slate-500 text-[11px] w-18 shrink-0">${entry.timestamp || ''}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded border text-center shrink-0 ${badgeClass}">${entry.type}</span>
+        <span class="text-slate-400 text-[11px] w-24 truncate shrink-0 hidden sm:inline" title="${entry.source || ''}">${entry.source || ''}</span>
+        <span class="truncate flex-1 ${detailClass}">${entry.detail}</span>
+      </div>
+      <span class="text-slate-500 text-[10px] shrink-0 font-mono pl-2">${entry.raw || ''}</span>
     `;
 
     this.midiLogContainer.prepend(row);
 
-    // Limit log rows
-    while (this.midiLogContainer.children.length > 50) {
+    // Limit visible DOM rows to prevent DOM performance overhead
+    while (this.midiLogContainer.children.length > 60) {
       this.midiLogContainer.removeChild(this.midiLogContainer.lastChild);
     }
   }
@@ -2886,10 +2949,64 @@ class App {
       });
     }
 
+    // Copy MIDI Log to Clipboard
+    const btnCopyLog = document.getElementById('btn-copy-log');
+    if (btnCopyLog) {
+      btnCopyLog.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        let logLines = [];
+        if (this.midiLogHistory && this.midiLogHistory.length > 0) {
+          logLines = this.midiLogHistory.map(item =>
+            `[${item.timestamp}] ${item.type.padEnd(14)} | ${String(item.source).padEnd(20)} | ${item.detail.padEnd(30)} | ${item.raw}`
+          );
+        } else if (this.midiLogContainer) {
+          const rows = Array.from(this.midiLogContainer.querySelectorAll('.log-entry'));
+          logLines = rows.map(r => r.innerText.replace(/\s+/g, ' ').trim()).reverse();
+        }
+
+        const logText = logLines.length > 0
+          ? `--- MidiSheet Live MIDI Event Log (${new Date().toLocaleString()}) ---\n` + logLines.join('\n')
+          : 'No MIDI events recorded yet.';
+
+        const originalContent = btnCopyLog.innerHTML;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(logText);
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = logText;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+          btnCopyLog.innerHTML = '<span>✓</span> Copied!';
+          btnCopyLog.classList.remove('text-sky-400');
+          btnCopyLog.classList.add('text-emerald-400');
+        } catch (err) {
+          console.warn('Clipboard copy failed:', err);
+          btnCopyLog.innerHTML = '<span>✕</span> Failed';
+        }
+
+        setTimeout(() => {
+          btnCopyLog.innerHTML = originalContent;
+          btnCopyLog.classList.remove('text-emerald-400');
+          btnCopyLog.classList.add('text-sky-400');
+        }, 2000);
+      });
+    }
+
     // Clear MIDI Log
-    document.getElementById('btn-clear-log')?.addEventListener('click', () => {
+    document.getElementById('btn-clear-log')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.midiLogHistory = [];
       if (this.midiLogContainer) {
-        this.midiLogContainer.innerHTML = '';
+        this.midiLogContainer.innerHTML = '<div class="text-xs text-slate-600 font-mono py-2 italic">Awaiting MIDI events (connect a MIDI keyboard or press keys above)...</div>';
       }
     });
 
